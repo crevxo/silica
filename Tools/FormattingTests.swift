@@ -36,15 +36,20 @@ func makeView(_ format: NoteFormat, _ text: String) -> PlainTextView {
     return view
 }
 
+/// Invoke the command the way the Format menu does: by selector, down the
+/// responder chain. `key` is the shortcut it is bound to, so the test reads the
+/// way the menu does.
 func press(_ view: PlainTextView, _ key: String, shift: Bool = false) {
-    var flags: NSEvent.ModifierFlags = .command
-    if shift { flags.insert(.shift) }
-    let event = NSEvent.keyEvent(
-        with: .keyDown, location: .zero, modifierFlags: flags, timestamp: 0,
-        windowNumber: 0, context: nil, characters: key,
-        charactersIgnoringModifiers: key, isARepeat: false, keyCode: 0
-    )!
-    _ = view.performKeyEquivalent(with: event)
+    let selector: Selector
+    switch (key, shift) {
+    case ("b", false): selector = #selector(PlainTextView.silicaToggleBold(_:))
+    case ("i", false): selector = #selector(PlainTextView.silicaToggleItalic(_:))
+    case ("u", false): selector = #selector(PlainTextView.silicaToggleUnderline(_:))
+    case ("x", true): selector = #selector(PlainTextView.silicaToggleStrikethrough(_:))
+    default: fatalError("no command bound to that shortcut")
+    }
+    guard view.responds(to: selector) else { fatalError("the editor does not answer \(selector)") }
+    view.perform(selector, with: nil)
 }
 
 func trait(_ view: PlainTextView, _ location: Int, _ mask: NSFontTraitMask) -> Bool {

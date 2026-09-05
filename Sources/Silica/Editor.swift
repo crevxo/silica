@@ -217,46 +217,29 @@ final class PlainTextView: NSTextView {
         )
     }
 
-    // MARK: Markdown shortcuts
+    // MARK: Formatting
 
-    /// ⌘B / ⌘I / ⌘U / ⇧⌘X. In a markdown note they write the marks; in a rich
-    /// note they set the styling directly. Either way pressing again undoes it.
-    override func performKeyEquivalent(with event: NSEvent) -> Bool {
-        let modifiers = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
-        guard let key = event.charactersIgnoringModifiers?.lowercased() else {
-            return super.performKeyEquivalent(with: event)
-        }
-
-        if modifiers == .command {
-            switch key {
-            case "b": bold(); return true
-            case "i": italic(); return true
-            case "u": underline(); return true
-            default: break
-            }
-        } else if modifiers == [.command, .shift], key == "x" {
-            strikethrough()
-            return true
-        }
-
-        return super.performKeyEquivalent(with: event)
-    }
-
-    private func bold() {
+    /// Reached from the Format menu, so the shortcuts are discoverable and route
+    /// through the responder chain like every other command on the Mac. In a
+    /// markdown note these write the marks; in a rich note they set the styling.
+    /// Either way, running one again undoes it.
+    ///
+    /// The names are prefixed because `underline(_:)` is already NSTextView's.
+    @objc func silicaToggleBold(_ sender: Any?) {
         format == .richText ? toggleTrait(.boldFontMask) : wrapSelection(in: "**")
     }
 
-    private func italic() {
+    @objc func silicaToggleItalic(_ sender: Any?) {
         format == .richText ? toggleTrait(.italicFontMask) : wrapSelection(in: "*")
     }
 
     /// Markdown has no underline of its own; the HTML tag is what every markdown
     /// renderer understands.
-    private func underline() {
+    @objc func silicaToggleUnderline(_ sender: Any?) {
         format == .richText ? toggleLine(.underlineStyle) : wrapSelection(in: "<u>", closing: "</u>")
     }
 
-    private func strikethrough() {
+    @objc func silicaToggleStrikethrough(_ sender: Any?) {
         format == .richText ? toggleLine(.strikethroughStyle) : wrapSelection(in: "~~")
     }
 

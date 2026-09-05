@@ -26,6 +26,11 @@ struct SilicaApp: App {
 struct SilicaCommands: Commands {
     @ObservedObject var state: AppState
 
+    /// Hand the command to whatever is focused — the editor, if the caret is in it.
+    static func send(_ selector: Selector) {
+        NSApp.sendAction(selector, to: nil, from: nil)
+    }
+
     var body: some Commands {
         CommandGroup(replacing: .newItem) {
             Button("New Tab") { state.newTab() }
@@ -59,6 +64,17 @@ struct SilicaCommands: Commands {
                 Divider()
                 Button("Check for Updates…") { AppDelegate.shared?.checkForUpdates() }
             }
+        }
+
+        CommandMenu("Format") {
+            Button("Bold") { SilicaCommands.send(#selector(PlainTextView.silicaToggleBold(_:))) }
+                .keyboardShortcut("b", modifiers: .command)
+            Button("Italic") { SilicaCommands.send(#selector(PlainTextView.silicaToggleItalic(_:))) }
+                .keyboardShortcut("i", modifiers: .command)
+            Button("Underline") { SilicaCommands.send(#selector(PlainTextView.silicaToggleUnderline(_:))) }
+                .keyboardShortcut("u", modifiers: .command)
+            Button("Strikethrough") { SilicaCommands.send(#selector(PlainTextView.silicaToggleStrikethrough(_:))) }
+                .keyboardShortcut("x", modifiers: [.command, .shift])
         }
 
         // Folded into the system View menu rather than a second one beside it.
