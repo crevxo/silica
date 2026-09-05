@@ -74,7 +74,7 @@ struct SearchPanel: View {
 
                 if !results.isEmpty {
                     Text("\(results.count)")
-                        .font(.system(size: 11, design: .monospaced))
+                        .font(.system(size: 11, weight: .medium))
                         .foregroundStyle(palette.inkSoft)
                 }
 

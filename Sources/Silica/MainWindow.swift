@@ -88,7 +88,7 @@ private struct FocusExitBar: View {
                     .lineLimit(1)
 
                 Text("esc")
-                    .font(.system(size: 10, design: .monospaced))
+                    .font(.system(size: 10, weight: .medium))
                     .foregroundStyle(palette.inkSoft)
                     .padding(.horizontal, 5)
                     .padding(.vertical, 1)
@@ -309,7 +309,7 @@ struct StatusBar: View {
     var body: some View {
         HStack {
             Text(stats)
-                .font(.system(size: 11, design: .monospaced))
+                .font(.system(size: 11, weight: .medium))
                 .foregroundStyle(palette.inkSoft)
             Spacer()
             IconButton(systemName: "gearshape", help: "Settings") { showingSettings.toggle() }
@@ -325,7 +325,7 @@ struct StatusBar: View {
     private var stats: String {
         let text = state.active?.text ?? ""
         let words = AppState.wordCount(text)
-        var parts = ["\(words) words"]
+        var parts = [words == 1 ? "1 word" : "\(words) words"]
         if state.showsDailyCount { parts.append("\(state.wordsToday) today") }
         return parts.joined(separator: " · ")
     }

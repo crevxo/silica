@@ -13,7 +13,7 @@ struct SettingsPopover: View {
                     Slider(value: $state.fontSize, in: AppState.fontSizeRange, step: 1)
                         .frame(width: 130)
                     Text("\(Int(state.fontSize)) pt")
-                        .font(.system(size: 11, design: .monospaced))
+                        .font(.system(size: 11, weight: .medium))
                         .foregroundStyle(palette.inkSoft)
                         .frame(width: 38, alignment: .trailing)
                 }
@@ -43,7 +43,7 @@ struct SettingsPopover: View {
                 Text("Library")
                     .font(.system(size: 12, weight: .medium))
                 Text(state.library.folder.path)
-                    .font(.system(size: 10.5, design: .monospaced))
+                    .font(.system(size: 10.5))
                     .foregroundStyle(palette.inkSoft)
                     .lineLimit(2)
                     .truncationMode(.middle)
@@ -56,7 +56,7 @@ struct SettingsPopover: View {
             }
 
             Text("Silica \(UpdateConfiguration.version)")
-                .font(.system(size: 10.5, design: .monospaced))
+                .font(.system(size: 10.5))
                 .foregroundStyle(palette.inkSoft)
                 .frame(maxWidth: .infinity, alignment: .trailing)
         }
