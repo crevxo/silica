@@ -137,6 +137,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         configured = true
         self.state = state
         quickNote.install(state: state)
+        // Constructing the controller starts Sparkle's scheduled update cycle.
+        // It remains nil in development builds without a public signing key.
+        _ = updaterController
 
         // Re-skin the window chrome whenever the theme flips, so the titlebar and
         // the paper are never two different whites for a frame.

@@ -76,9 +76,11 @@ struct Editor: NSViewRepresentable {
         // re-applied on every later redraw.
         if let selection, selection.noteID == noteID, context.coordinator.appliedSelection != selection.token {
             context.coordinator.appliedSelection = selection.token
+            let textLength = textView.string.utf16.count
+            let location = min(selection.location, textLength)
             let clamped = NSRange(
-                location: min(selection.location, textView.string.utf16.count),
-                length: selection.length
+                location: location,
+                length: min(selection.length, textLength - location)
             )
             textView.setSelectedRange(clamped)
             textView.scrollRangeToVisible(clamped)

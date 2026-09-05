@@ -1,5 +1,16 @@
 import Foundation
 
+enum LibraryError: LocalizedError {
+    case conflictingFile(String)
+
+    var errorDescription: String? {
+        switch self {
+        case .conflictingFile(let name):
+            return "The destination already contains a different note named ‘\(name)’. No files were replaced."
+        }
+    }
+}
+
 /// One open note. `url` is the real file on disk — the note *is* the file, so a
 /// rename here is a rename in Finder and nothing lives in a database.
 struct Note: Identifiable, Equatable {
@@ -36,7 +47,11 @@ final class Library {
         try fm.createDirectory(at: newFolder, withIntermediateDirectories: true)
         for file in noteFiles(in: folder) {
             let dest = newFolder.appendingPathComponent(file.lastPathComponent)
-            if !fm.fileExists(atPath: dest.path) {
+            if fm.fileExists(atPath: dest.path) {
+                guard try Data(contentsOf: file) == Data(contentsOf: dest) else {
+                    throw LibraryError.conflictingFile(file.lastPathComponent)
+                }
+            } else {
                 try fm.copyItem(at: file, to: dest)
             }
         }

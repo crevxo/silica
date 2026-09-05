@@ -94,7 +94,7 @@ final class QuickNote: NSObject, NSWindowDelegate {
         note.text = text
         state.library.write(note)
         state.notes.append(note)
-        state.activeID = note.id
+        state.select(note.id)
         text = ""
         close()
         NSApp.windows.first { !($0 is NSPanel) }?.makeKeyAndOrderFront(nil)

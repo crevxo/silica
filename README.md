@@ -44,15 +44,16 @@ SILICA_VERSION=1.0.1 SILICA_BUILD=2 ./build.sh
 ```
 
 The default feed points at
-`https://github.com/crevxo/silica/releases/latest/download/appcast.xml`. Generate
-Sparkle's EdDSA key before the first release, then pass its public half when
-building:
+`https://github.com/crevxo/silica/releases/latest/download/appcast.xml`. The
+public half of Silica's Sparkle EdDSA key is embedded in release builds; its
+private half is stored in the maintainer's macOS Keychain.
+
+Override the public key only when intentionally rotating it:
 
 ```sh
 SILICA_PUBLIC_ED_KEY=BASE64_PUBLIC_KEY \
 ./build.sh
 ```
 
-Until the public key is supplied, the updater stays dormant and the update menu
-is hidden. Keep the EdDSA private key out of the repository. Override
-`SILICA_APPCAST_URL` only if the feed moves elsewhere.
+Keep the EdDSA private key out of the repository. Override `SILICA_APPCAST_URL`
+only if the feed moves elsewhere.

@@ -8,7 +8,7 @@ VERSION="${SILICA_VERSION:-1.0.0}"
 BUILD="${SILICA_BUILD:-1}"
 # Fill these in when the release repository and Sparkle signing key are ready.
 APPCAST_URL="${SILICA_APPCAST_URL:-https://github.com/crevxo/silica/releases/latest/download/appcast.xml}"
-PUBLIC_ED_KEY="${SILICA_PUBLIC_ED_KEY:-}"
+PUBLIC_ED_KEY="${SILICA_PUBLIC_ED_KEY:-2y+EBTsESNugIHKjOp2ZP2njrnJmFVhiNZ864aPZ2MM=}"
 echo "==> compiling"
 swift build -c release
 
@@ -27,6 +27,7 @@ if [ ! -d "$SPARKLE_FRAMEWORK" ]; then
     exit 1
 fi
 ditto "$SPARKLE_FRAMEWORK" "$APP/Contents/Frameworks/Sparkle.framework"
+install_name_tool -add_rpath "@executable_path/../Frameworks" "$APP/Contents/MacOS/Silica"
 
 cat > "$APP/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
