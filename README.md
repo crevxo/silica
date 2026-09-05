@@ -1,12 +1,12 @@
 # Silica
 
-A minimalist plain-text editor for macOS. Tabs, a blank page, and nothing else on
+A minimalist writing app for macOS. Tabs, a blank page, and nothing else on
 screen unless you ask for it.
 
-Your notes are `.md` files in a folder you pick (`~/Documents/Silica` by default).
-No database, no cloud, no account — the folder is the app's entire state, so it
-works with Finder, iCloud Drive, Dropbox, or a git repo without knowing about any
-of them.
+Your notes are Markdown (`.md`) or rich-text (`.rtf`) files in a folder you pick
+(`~/Documents/Silica` by default). No database, no cloud, no account — the folder
+is the app's entire state, so it works with Finder, iCloud Drive, Dropbox, or a
+git repo without knowing about any of them.
 
 ## Features
 
@@ -22,6 +22,8 @@ of them.
   note, kept in `.silica-versions` beside the notes
 - **Words written today** — in the status bar, on by default
 - **Typewriter scrolling** — keeps the caret at the middle of the window
+- **Markdown or rich text** — pick the format for new notes; formatting shortcuts
+  either write Markdown marks or apply native rich-text styling
 - **Export** — Markdown or paginated PDF
 - **Autosave** — 600ms after you stop typing, straight to the file
 - **Automatic updates** — Sparkle checks a signed appcast once release settings

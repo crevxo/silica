@@ -324,7 +324,14 @@ final class AppState: ObservableObject {
         guard let note = active, let i = notes.firstIndex(where: { $0.id == note.id }) else { return }
         // Snapshot what is on screen first, so restoring is itself undoable.
         versions.snapshotIfNeeded(note, force: true)
-        notes[i].text = versions.text(of: version)
+        let restored = versions.text(of: version)
+        notes[i].text = restored
+        // History deliberately stores portable plain text. A rich note still
+        // needs a matching attributed payload, otherwise `write` would save the
+        // pre-restore RTF and silently undo the restore on the next launch.
+        if notes[i].format == .richText {
+            notes[i].rich = NSAttributedString(string: restored)
+        }
         library.write(notes[i])
         showingHistory = false
     }
