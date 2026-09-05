@@ -125,9 +125,10 @@ final class PlainTextView: NSTextView {
     func applyStyle(fontSize: Double, palette: Palette) {
         let font = NSFont.systemFont(ofSize: fontSize)
         let paragraph = NSMutableParagraphStyle()
-        // 1.65 line height and a blank line between paragraphs, matching the design.
-        paragraph.lineHeightMultiple = 1.65
-        paragraph.paragraphSpacing = fontSize
+        // Keep the line fragment tied to the font. Enlarging the fragment with
+        // `lineHeightMultiple` also enlarges AppKit's system insertion indicator.
+        paragraph.lineHeightMultiple = 1
+        paragraph.paragraphSpacing = fontSize * 0.75
 
         self.font = font
         self.defaultParagraphStyle = paragraph
@@ -180,6 +181,49 @@ final class PlainTextView: NSTextView {
         trimmed.size.height = height
         trimmed.size.width = 2
         super.drawInsertionPoint(in: trimmed, color: color, turnedOn: flag)
+    }
+
+    /// macOS 14+ renders NSTextView's caret with a separate
+    /// `NSTextInsertionIndicator` view, bypassing `drawInsertionPoint`. Keep that
+    /// view constrained too; its rendered caret is exactly as tall as its frame.
+    override func layout() {
+        super.layout()
+        constrainInsertionIndicators(in: self)
+    }
+
+    override func didAddSubview(_ subview: NSView) {
+        super.didAddSubview(subview)
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            self.constrainInsertionIndicators(in: self)
+        }
+    }
+
+    override func updateInsertionPointStateAndRestartTimer(_ restartFlag: Bool) {
+        super.updateInsertionPointStateAndRestartTimer(restartFlag)
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            self.constrainInsertionIndicators(in: self)
+        }
+    }
+
+    private func constrainInsertionIndicators(in view: NSView) {
+        guard let font else { return }
+        let height = max(1, font.capHeight)
+
+        for subview in view.subviews {
+            if let indicator = subview as? NSTextInsertionIndicator {
+                var frame = indicator.frame
+                let targetY = frame.midY - height / 2
+                if abs(frame.height - height) > 0.01 || abs(frame.minY - targetY) > 0.01 {
+                    frame.origin.y = targetY
+                    frame.size.height = height
+                    indicator.frame = frame
+                }
+            } else {
+                constrainInsertionIndicators(in: subview)
+            }
+        }
     }
 
     /// Scroll so the caret sits at the vertical middle of the visible area.
