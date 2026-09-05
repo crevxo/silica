@@ -128,6 +128,8 @@ final class PlainTextView: NSTextView {
         // Keep the line fragment tied to the font. Enlarging the fragment with
         // `lineHeightMultiple` also enlarges AppKit's system insertion indicator.
         paragraph.lineHeightMultiple = 1
+        paragraph.minimumLineHeight = font.pointSize
+        paragraph.maximumLineHeight = font.pointSize
         paragraph.paragraphSpacing = fontSize * 0.75
 
         self.font = font
@@ -167,9 +169,8 @@ final class PlainTextView: NSTextView {
         )
     }
 
-    /// AppKit draws the insertion point the full height of the line fragment. With
-    /// 1.65 line spacing that is much taller than the letters, so keep it to the
-    /// font's visible capital height and centre it in the fragment instead.
+    /// Keep the legacy insertion-point drawing path aligned with the visible
+    /// letter height instead of the text container's line fragment.
     override func drawInsertionPoint(in rect: NSRect, color: NSColor, turnedOn flag: Bool) {
         guard let font else {
             super.drawInsertionPoint(in: rect, color: color, turnedOn: flag)
@@ -183,9 +184,8 @@ final class PlainTextView: NSTextView {
         super.drawInsertionPoint(in: trimmed, color: color, turnedOn: flag)
     }
 
-    /// macOS 14+ renders NSTextView's caret with a separate
-    /// `NSTextInsertionIndicator` view, bypassing `drawInsertionPoint`. Keep that
-    /// view constrained too; its rendered caret is exactly as tall as its frame.
+    /// macOS 14+ renders NSTextView's caret with a separate insertion-indicator
+    /// view. Its rendered caret is exactly as tall as its frame.
     override func layout() {
         super.layout()
         constrainInsertionIndicators(in: self)
