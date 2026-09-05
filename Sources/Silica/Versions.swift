@@ -19,17 +19,29 @@ final class VersionStore {
     private var folder: URL
 
     init(libraryFolder: URL) {
-        folder = libraryFolder.appendingPathComponent(".manila-versions")
+        folder = VersionStore.folder(in: libraryFolder)
     }
 
     func relocate(to libraryFolder: URL) {
-        folder = libraryFolder.appendingPathComponent(".manila-versions")
+        folder = VersionStore.folder(in: libraryFolder)
+    }
+
+    /// History written before the app was renamed lives under the old name; it is
+    /// moved across the first time a library is opened.
+    private static func folder(in libraryFolder: URL) -> URL {
+        let current = libraryFolder.appendingPathComponent(".silica-versions")
+        let legacy = libraryFolder.appendingPathComponent(".manila-versions")
+        let fm = FileManager.default
+        if fm.fileExists(atPath: legacy.path) && !fm.fileExists(atPath: current.path) {
+            try? fm.moveItem(at: legacy, to: current)
+        }
+        return current
     }
 
     /// Copy history into a prospective library folder without changing the active
     /// location. This lets the caller keep using the original library on failure.
     func copy(to libraryFolder: URL) throws {
-        let destination = libraryFolder.appendingPathComponent(".manila-versions")
+        let destination = VersionStore.folder(in: libraryFolder)
         guard destination.standardizedFileURL != folder.standardizedFileURL else { return }
 
         let fm = FileManager.default
