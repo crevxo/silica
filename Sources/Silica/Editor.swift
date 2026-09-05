@@ -125,9 +125,10 @@ final class PlainTextView: NSTextView {
     func applyStyle(fontSize: Double, palette: Palette) {
         let font = NSFont.systemFont(ofSize: fontSize)
         let paragraph = NSMutableParagraphStyle()
-        // The caret is drawn from the baseline now, so the line fragment is free
-        // to breathe without dragging the caret's height along with it.
-        paragraph.lineHeightMultiple = 1.35
+        // The caret is AppKit's own, and it is exactly as tall as the line
+        // fragment — so line spacing is added below the line rather than by
+        // inflating the fragment the caret is measured against.
+        paragraph.lineSpacing = fontSize * 0.35
         paragraph.paragraphSpacing = fontSize * 0.75
 
         self.font = font
@@ -174,57 +175,6 @@ final class PlainTextView: NSTextView {
                 .paragraphStyle: defaultParagraphStyle ?? NSParagraphStyle.default
             ]
         )
-    }
-
-    /// AppKit hands us the whole line fragment, which is taller than the letters
-    /// on it — that is where the oversized caret came from. Redraw it as the
-    /// own inked box (cap height to descender) sitting on the text baseline,
-    /// so the caret is exactly as tall as the characters beside it.
-    override func drawInsertionPoint(in rect: NSRect, color: NSColor, turnedOn flag: Bool) {
-        guard let font else {
-            super.drawInsertionPoint(in: rect, color: color, turnedOn: flag)
-            return
-        }
-        // Cap height down to the descender is the box the letters actually ink;
-        // the font's full ascender leaves a gap of air above every capital.
-        let height = font.capHeight - font.descender
-        var caret = rect
-        caret.size.width = max(1, round(font.pointSize / 12))
-        caret.size.height = height
-        if let baseline = caretBaselineY() {
-            caret.origin.y = baseline - font.capHeight
-        } else {
-            caret.origin.y = rect.midY - height / 2
-        }
-        super.drawInsertionPoint(in: caret, color: color, turnedOn: flag)
-    }
-
-    /// The baseline of the line the caret is on, in view coordinates.
-    private func caretBaselineY() -> CGFloat? {
-        guard let layoutManager, let font, let storage = textStorage else { return nil }
-        let inset = textContainerInset.height
-
-        // An empty document, or the caret parked after a trailing newline, has no
-        // glyph to measure — AppKit lays those out as the "extra" line fragment.
-        var useExtraFragment = storage.length == 0
-        var index = selectedRange().location
-        if !useExtraFragment && index >= storage.length {
-            index = storage.length - 1
-            let last = (storage.string as NSString).character(at: index)
-            useExtraFragment = (last == 0x0A || last == 0x0D)
-        }
-        if useExtraFragment {
-            let used = layoutManager.extraLineFragmentUsedRect
-            guard used.height > 0 else { return nil }
-            // The extra leading from lineHeightMultiple sits above the text, so
-            // the bottom of the used rect is the descender line.
-            return used.maxY + font.descender + inset
-        }
-
-        let glyph = layoutManager.glyphIndexForCharacter(at: index)
-        guard glyph < layoutManager.numberOfGlyphs else { return nil }
-        let fragment = layoutManager.lineFragmentRect(forGlyphAt: glyph, effectiveRange: nil)
-        return fragment.minY + layoutManager.location(forGlyphAt: glyph).y + inset
     }
 
     /// Scroll so the caret sits at the vertical middle of the visible area.
