@@ -8,6 +8,8 @@ final class AppState: ObservableObject {
 
     @Published var appearance: Appearance { didSet { defaults.set(appearance.rawValue, forKey: "appearance") } }
     @Published var fontSize: Double { didSet { defaults.set(fontSize, forKey: "fontSize") } }
+    /// The format new notes are created in. Existing notes keep their own.
+    @Published var newNoteFormat: NoteFormat { didSet { defaults.set(newNoteFormat.rawValue, forKey: "newNoteFormat") } }
     @Published var tabsVisible: Bool { didSet { defaults.set(tabsVisible, forKey: "tabsVisible") } }
     @Published var focusMode: Bool { didSet { defaults.set(focusMode, forKey: "focusMode") } }
     @Published var typewriterMode: Bool { didSet { defaults.set(typewriterMode, forKey: "typewriterMode") } }
@@ -58,6 +60,7 @@ final class AppState: ObservableObject {
         defaults.register(defaults: [
             "appearance": Appearance.light.rawValue,
             "fontSize": 14.0,
+            "newNoteFormat": NoteFormat.markdown.rawValue,
             "tabsVisible": true,
             "focusMode": false,
             "typewriterMode": false,
@@ -65,6 +68,7 @@ final class AppState: ObservableObject {
         ])
         appearance = Appearance(rawValue: defaults.string(forKey: "appearance") ?? "") ?? .light
         fontSize = defaults.double(forKey: "fontSize")
+        newNoteFormat = NoteFormat(rawValue: defaults.string(forKey: "newNoteFormat") ?? "") ?? .markdown
         tabsVisible = defaults.bool(forKey: "tabsVisible")
         focusMode = defaults.bool(forKey: "focusMode")
         typewriterMode = defaults.bool(forKey: "typewriterMode")
@@ -112,7 +116,7 @@ final class AppState: ObservableObject {
     // MARK: - Tabs
 
     func newTab() {
-        let note = library.create(titled: "Untitled", avoiding: Set(notes.map(\.title)))
+        let note = library.create(titled: "Untitled", format: newNoteFormat, avoiding: Set(notes.map(\.title)))
         notes.append(note)
         activeID = note.id
         persistIndex()
@@ -152,8 +156,9 @@ final class AppState: ObservableObject {
 
     func duplicateActive() {
         guard let note = active else { return }
-        var copy = library.create(titled: "\(note.title) copy", avoiding: Set(notes.map(\.title)))
+        var copy = library.create(titled: "\(note.title) copy", format: note.format, avoiding: Set(notes.map(\.title)))
         copy.text = note.text
+        copy.rich = note.rich
         library.write(copy)
         notes.append(copy)
         activeID = copy.id
@@ -168,10 +173,13 @@ final class AppState: ObservableObject {
 
     // MARK: - Editing
 
-    func updateText(_ text: String, for id: UUID) {
-        guard let i = notes.firstIndex(where: { $0.id == id }), notes[i].text != text else { return }
+    func updateText(_ text: String, rich: NSAttributedString? = nil, for id: UUID) {
+        guard let i = notes.firstIndex(where: { $0.id == id }) else { return }
+        let styleChanged = notes[i].format == .richText && rich != nil
+        guard notes[i].text != text || styleChanged else { return }
         let before = AppState.wordCount(notes[i].text)
         notes[i].text = text
+        if notes[i].format == .richText { notes[i].rich = rich }
         // Only growth counts. Deleting a paragraph shouldn't put the day's total
         // into reverse, and rewriting a sentence shouldn't count it twice.
         let added = AppState.wordCount(text) - before

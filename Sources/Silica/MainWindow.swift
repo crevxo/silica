@@ -46,11 +46,13 @@ struct MainWindow: View {
             Editor(
                 noteID: note.id,
                 text: note.text,
+                rich: note.rich,
+                format: note.format,
                 fontSize: state.fontSize,
                 palette: state.palette,
                 typewriter: state.typewriterMode,
                 selection: state.pendingSelection,
-                onChange: { state.updateText($0, for: note.id) }
+                onChange: { state.updateText($0, rich: $1, for: note.id) }
             )
             .id(note.id)
         } else {

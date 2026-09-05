@@ -1,4 +1,4 @@
-import Foundation
+import AppKit
 
 enum LibraryError: LocalizedError {
     case conflictingFile(String)
@@ -16,8 +16,14 @@ enum LibraryError: LocalizedError {
 struct Note: Identifiable, Equatable {
     let id: UUID
     var title: String
+    /// Always the plain words, whatever the file format — search, word counts and
+    /// version history all read this and never have to know about styling.
     var text: String
+    /// Set only for a rich-text note: the styling its file carries.
+    var rich: NSAttributedString?
     var url: URL
+
+    var format: NoteFormat { NoteFormat.of(url) }
 
     static func == (a: Note, b: Note) -> Bool { a.id == b.id }
 }
@@ -40,7 +46,16 @@ final class Library {
         try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
     }
 
-    private var indexURL: URL { folder.appendingPathComponent(".manila-tabs.json") }
+    private var indexURL: URL { folder.appendingPathComponent(".silica-tabs.json") }
+
+    /// Libraries written before the app was renamed keep their tab order in a
+    /// differently-named dotfile. Move it across once, quietly.
+    private func adoptLegacyIndex() {
+        let legacy = folder.appendingPathComponent(".manila-tabs.json")
+        let fm = FileManager.default
+        guard fm.fileExists(atPath: legacy.path), !fm.fileExists(atPath: indexURL.path) else { return }
+        try? fm.moveItem(at: legacy, to: indexURL)
+    }
 
     func move(to newFolder: URL) throws {
         let fm = FileManager.default
@@ -70,21 +85,32 @@ final class Library {
             includingPropertiesForKeys: [.contentModificationDateKey],
             options: [.skipsHiddenFiles]
         )) ?? []
-        return contents.filter { ["md", "txt", "markdown"].contains($0.pathExtension.lowercased()) }
+        return contents.filter { ["md", "txt", "markdown", "rtf"].contains($0.pathExtension.lowercased()) }
     }
 
     // MARK: - Loading
 
     func load() -> (notes: [Note], activeID: UUID?) {
+        adoptLegacyIndex()
         let index = (try? JSONDecoder().decode(Index.self, from: Data(contentsOf: indexURL))) ?? Index()
 
         var loaded: [Note] = []
         for url in noteFiles(in: folder) {
-            let text = (try? String(contentsOf: url, encoding: .utf8)) ?? ""
+            var text = ""
+            var rich: NSAttributedString?
+            if NoteFormat.of(url) == .richText {
+                rich = (try? Data(contentsOf: url)).flatMap {
+                    NSAttributedString(rtf: $0, documentAttributes: nil)
+                }
+                text = rich?.string ?? ""
+            } else {
+                text = (try? String(contentsOf: url, encoding: .utf8)) ?? ""
+            }
             loaded.append(Note(
                 id: UUID(),
                 title: url.deletingPathExtension().lastPathComponent,
                 text: text,
+                rich: rich,
                 url: url
             ))
         }
@@ -119,16 +145,22 @@ final class Library {
 
     /// Nothing is written until there is something to write. A tab you open and
     /// never type in leaves no file behind, so the folder only ever holds writing.
-    func create(titled desired: String, avoiding inMemory: Set<String> = []) -> Note {
+    func create(titled desired: String, format: NoteFormat = .markdown, avoiding inMemory: Set<String> = []) -> Note {
         let title = uniqueTitle(from: desired, excluding: nil, alsoTaken: inMemory)
-        let url = folder.appendingPathComponent(title).appendingPathExtension("md")
-        return Note(id: UUID(), title: title, text: "", url: url)
+        let url = folder.appendingPathComponent(title).appendingPathExtension(format.fileExtension)
+        return Note(id: UUID(), title: title, text: "", rich: nil, url: url)
     }
 
     func write(_ note: Note) {
         let exists = FileManager.default.fileExists(atPath: note.url.path)
         guard exists || !note.text.isEmpty else { return }
-        try? note.text.write(to: note.url, atomically: true, encoding: .utf8)
+        if note.format == .richText, let rich = note.rich {
+            let range = NSRange(location: 0, length: rich.length)
+            guard let data = rich.rtf(from: range, documentAttributes: [.documentType: NSAttributedString.DocumentType.rtf]) else { return }
+            try? data.write(to: note.url, options: .atomic)
+        } else {
+            try? note.text.write(to: note.url, atomically: true, encoding: .utf8)
+        }
     }
 
     /// Returns the new URL, or nil if the rename was refused (empty or unchanged).

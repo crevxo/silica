@@ -7,11 +7,14 @@ import AppKit
 struct Editor: NSViewRepresentable {
     let noteID: UUID
     let text: String
+    /// Set for a rich-text note; the styling the file itself carries.
+    let rich: NSAttributedString?
+    let format: NoteFormat
     let fontSize: Double
     let palette: Palette
     let typewriter: Bool
     let selection: PendingSelection?
-    let onChange: (String) -> Void
+    let onChange: (String, NSAttributedString?) -> Void
 
     func makeCoordinator() -> Coordinator { Coordinator(self) }
 
@@ -33,7 +36,6 @@ struct Editor: NSViewRepresentable {
         let textView = PlainTextView(frame: .zero, textContainer: container)
         textView.delegate = context.coordinator
         textView.isEditable = true
-        textView.isRichText = false
         textView.importsGraphics = false
         textView.allowsUndo = true
         textView.isAutomaticQuoteSubstitutionEnabled = false
@@ -56,11 +58,16 @@ struct Editor: NSViewRepresentable {
     func updateNSView(_ scroll: NSScrollView, context: Context) {
         guard let textView = scroll.documentView as? PlainTextView else { return }
         context.coordinator.parent = self
-        textView.applyStyle(fontSize: fontSize, palette: palette)
+        textView.format = format
+        textView.isRichText = format == .richText
 
         if context.coordinator.loadedNoteID != noteID {
             context.coordinator.loadedNoteID = noteID
-            textView.string = text
+            if let rich, format == .richText {
+                textView.textStorage?.setAttributedString(rich)
+            } else {
+                textView.string = text
+            }
             textView.setSelectedRange(NSRange(location: text.utf16.count, length: 0))
             scroll.contentView.scroll(to: .zero)
         } else if textView.string != text {
@@ -71,6 +78,8 @@ struct Editor: NSViewRepresentable {
                 length: 0
             ))
         }
+
+        textView.applyStyle(fontSize: fontSize, palette: palette)
 
         // A search result hands over a range once; the token stops it being
         // re-applied on every later redraw.
@@ -104,7 +113,8 @@ struct Editor: NSViewRepresentable {
 
         func textDidChange(_ notification: Notification) {
             guard let textView = notification.object as? PlainTextView else { return }
-            parent.onChange(textView.string)
+            textView.restyleIfMarkdown()
+            parent.onChange(textView.string, textView.richSnapshot())
             if textView.typewriter { textView.centerCaret() }
         }
 
@@ -121,6 +131,9 @@ final class PlainTextView: NSTextView {
     var placeholder = "Start writing…"
     var placeholderColor: NSColor = .secondaryLabelColor
     var typewriter = false
+    var format: NoteFormat = .markdown
+    private var baseFont = NSFont.systemFont(ofSize: 14)
+    private var ink = NSColor.textColor
 
     func applyStyle(fontSize: Double, palette: Palette) {
         let font = NSFont.systemFont(ofSize: fontSize)
@@ -131,6 +144,8 @@ final class PlainTextView: NSTextView {
         paragraph.lineSpacing = fontSize * 0.35
         paragraph.paragraphSpacing = fontSize * 0.75
 
+        self.baseFont = font
+        self.ink = palette.nsInk
         self.font = font
         self.defaultParagraphStyle = paragraph
         self.textColor = palette.nsInk
@@ -143,16 +158,41 @@ final class PlainTextView: NSTextView {
         ]
 
         // Re-style text that is already on screen (font size change, theme switch).
-        if let storage = textStorage, storage.length > 0 {
-            let all = NSRange(location: 0, length: storage.length)
-            storage.beginEditing()
+        guard let storage = textStorage, storage.length > 0 else { return }
+        let all = NSRange(location: 0, length: storage.length)
+        storage.beginEditing()
+        if format == .richText {
+            // A rich note's bold and italics are its own; only the things the
+            // whole app controls — size, colour, spacing — are re-applied.
+            storage.enumerateAttribute(.font, in: all) { value, range, _ in
+                let existing = (value as? NSFont) ?? font
+                let resized = NSFont(descriptor: existing.fontDescriptor, size: fontSize) ?? font
+                storage.addAttribute(.font, value: resized, range: range)
+            }
+            storage.addAttribute(.foregroundColor, value: palette.nsInk, range: all)
+            storage.addAttribute(.paragraphStyle, value: paragraph, range: all)
+        } else {
             storage.setAttributes([
                 .font: font,
                 .foregroundColor: palette.nsInk,
                 .paragraphStyle: paragraph
             ], range: all)
-            storage.endEditing()
         }
+        storage.endEditing()
+        if format == .markdown { restyleIfMarkdown() }
+    }
+
+    /// Repaint the markdown as what it means. Cheap enough to run on every
+    /// keystroke, and a no-op for a rich-text note.
+    func restyleIfMarkdown() {
+        guard format == .markdown, let storage = textStorage else { return }
+        MarkdownStyler.style(storage, baseFont: baseFont, ink: ink)
+    }
+
+    /// The styled text to save, for a rich note only.
+    func richSnapshot() -> NSAttributedString? {
+        guard format == .richText, let storage = textStorage else { return nil }
+        return NSAttributedString(attributedString: storage)
     }
 
     override func draw(_ dirtyRect: NSRect) {
@@ -175,6 +215,169 @@ final class PlainTextView: NSTextView {
                 .paragraphStyle: defaultParagraphStyle ?? NSParagraphStyle.default
             ]
         )
+    }
+
+    // MARK: Markdown shortcuts
+
+    /// ⌘B / ⌘I / ⌘U / ⇧⌘X. In a markdown note they write the marks; in a rich
+    /// note they set the styling directly. Either way pressing again undoes it.
+    override func performKeyEquivalent(with event: NSEvent) -> Bool {
+        let modifiers = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+        guard let key = event.charactersIgnoringModifiers?.lowercased() else {
+            return super.performKeyEquivalent(with: event)
+        }
+
+        if modifiers == .command {
+            switch key {
+            case "b": bold(); return true
+            case "i": italic(); return true
+            case "u": underline(); return true
+            default: break
+            }
+        } else if modifiers == [.command, .shift], key == "x" {
+            strikethrough()
+            return true
+        }
+
+        return super.performKeyEquivalent(with: event)
+    }
+
+    private func bold() {
+        format == .richText ? toggleTrait(.boldFontMask) : wrapSelection(in: "**")
+    }
+
+    private func italic() {
+        format == .richText ? toggleTrait(.italicFontMask) : wrapSelection(in: "*")
+    }
+
+    /// Markdown has no underline of its own; the HTML tag is what every markdown
+    /// renderer understands.
+    private func underline() {
+        format == .richText ? toggleLine(.underlineStyle) : wrapSelection(in: "<u>", closing: "</u>")
+    }
+
+    private func strikethrough() {
+        format == .richText ? toggleLine(.strikethroughStyle) : wrapSelection(in: "~~")
+    }
+
+    // MARK: Rich text
+
+    private func toggleTrait(_ trait: NSFontTraitMask) {
+        let manager = NSFontManager.shared
+        let range = selectedRange()
+        let current = (typingAttributes[.font] as? NSFont) ?? baseFont
+        let reference = (range.length > 0
+            ? textStorage?.attribute(.font, at: range.location, effectiveRange: nil) as? NSFont
+            : current) ?? current
+        let isOn = manager.traits(of: reference).contains(trait)
+
+        applyToSelection(range) { storage in
+            storage.enumerateAttribute(.font, in: range) { value, subrange, _ in
+                let font = (value as? NSFont) ?? self.baseFont
+                let updated = isOn
+                    ? manager.convert(font, toNotHaveTrait: trait)
+                    : manager.convert(font, toHaveTrait: trait)
+                storage.addAttribute(.font, value: updated, range: subrange)
+            }
+        } typing: { attributes in
+            attributes[.font] = isOn
+                ? manager.convert(current, toNotHaveTrait: trait)
+                : manager.convert(current, toHaveTrait: trait)
+        }
+    }
+
+    private func toggleLine(_ attribute: NSAttributedString.Key) {
+        let range = selectedRange()
+        let existing = range.length > 0
+            ? textStorage?.attribute(attribute, at: range.location, effectiveRange: nil)
+            : typingAttributes[attribute]
+        let isOn = (existing as? Int ?? 0) != 0
+
+        applyToSelection(range) { storage in
+            if isOn {
+                storage.removeAttribute(attribute, range: range)
+            } else {
+                storage.addAttribute(attribute, value: NSUnderlineStyle.single.rawValue, range: range)
+            }
+        } typing: { attributes in
+            if isOn { attributes.removeValue(forKey: attribute) }
+            else { attributes[attribute] = NSUnderlineStyle.single.rawValue }
+        }
+    }
+
+    /// With a selection the styling lands on it; with none it arms what you type
+    /// next, the way every other Mac editor behaves.
+    private func applyToSelection(
+        _ range: NSRange,
+        storage apply: (NSTextStorage) -> Void,
+        typing arm: (inout [NSAttributedString.Key: Any]) -> Void
+    ) {
+        var attributes = typingAttributes
+        arm(&attributes)
+        typingAttributes = attributes
+
+        guard range.length > 0, let storage = textStorage else { return }
+        guard shouldChangeText(in: range, replacementString: nil) else { return }
+        storage.beginEditing()
+        apply(storage)
+        storage.endEditing()
+        didChangeText()
+    }
+
+    // MARK: Markdown
+
+    private func wrapSelection(in opening: String, closing: String? = nil) {
+        let close = closing ?? opening
+        let text = string as NSString
+        let range = selectedRange()
+        let openLength = (opening as NSString).length
+        let closeLength = (close as NSString).length
+
+        // Marks inside the selection — take them off.
+        if range.length >= openLength + closeLength {
+            let selected = text.substring(with: range)
+            if selected.hasPrefix(opening) && selected.hasSuffix(close) {
+                let inner = (selected as NSString).substring(
+                    with: NSRange(location: openLength, length: (selected as NSString).length - openLength - closeLength)
+                )
+                replaceCharacters(
+                    in: range,
+                    with: inner,
+                    selecting: NSRange(location: range.location, length: (inner as NSString).length)
+                )
+                return
+            }
+        }
+
+        // Marks hugging the selection — take those off too, so double-tapping the
+        // shortcut undoes itself whether or not the marks got selected.
+        let before = NSRange(location: range.location - openLength, length: openLength)
+        let after = NSRange(location: NSMaxRange(range), length: closeLength)
+        if before.location >= 0, NSMaxRange(after) <= text.length,
+           text.substring(with: before) == opening, text.substring(with: after) == close {
+            let outer = NSRange(location: before.location, length: openLength + range.length + closeLength)
+            replaceCharacters(
+                in: outer,
+                with: text.substring(with: range),
+                selecting: NSRange(location: before.location, length: range.length)
+            )
+            return
+        }
+
+        // Otherwise wrap. With nothing selected the caret lands between the marks,
+        // ready to type into them.
+        replaceCharacters(
+            in: range,
+            with: opening + text.substring(with: range) + close,
+            selecting: NSRange(location: range.location + openLength, length: range.length)
+        )
+    }
+
+    private func replaceCharacters(in range: NSRange, with replacement: String, selecting: NSRange) {
+        guard shouldChangeText(in: range, replacementString: replacement) else { return }
+        textStorage?.replaceCharacters(in: range, with: replacement)
+        didChangeText()
+        setSelectedRange(selecting)
     }
 
     /// Scroll so the caret sits at the vertical middle of the visible area.

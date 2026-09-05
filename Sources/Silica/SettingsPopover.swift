@@ -19,6 +19,17 @@ struct SettingsPopover: View {
                 }
             }
 
+            row("New notes") {
+                Picker("", selection: $state.newNoteFormat) {
+                    ForEach(NoteFormat.allCases) { format in
+                        Text(format.label).tag(format)
+                    }
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+                .frame(width: 170)
+            }
+
             row("Appearance") {
                 Picker("", selection: $state.appearance) {
                     Text("Light").tag(Appearance.light)

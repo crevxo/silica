@@ -19,7 +19,7 @@ of them.
 - **Search** (⌘F) — one field across every note; results show the matching line
   and jump straight to it
 - **Version history** (⌘Y) — a snapshot every five minutes of writing, last 30 per
-  note, kept in `.manila-versions` beside the notes
+  note, kept in `.silica-versions` beside the notes
 - **Words written today** — in the status bar, on by default
 - **Typewriter scrolling** — keeps the caret at the middle of the window
 - **Export** — Markdown or paginated PDF
