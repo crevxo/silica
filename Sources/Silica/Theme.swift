@@ -20,7 +20,7 @@ enum Appearance: String, Codable, CaseIterable {
     }
 }
 
-struct Palette {
+struct Palette: Equatable {
     let background: Color
     let ink: Color
     let inkSoft: Color

@@ -28,6 +28,7 @@ func makeView(_ format: NoteFormat, _ text: String) -> PlainTextView {
     let storage = NSTextStorage()
     storage.addLayoutManager(layout)
     let view = PlainTextView(frame: NSRect(x: 0, y: 0, width: 400, height: 300), textContainer: container)
+    storage.delegate = view
     view.format = format
     view.isRichText = format == .richText
     view.allowsUndo = true
@@ -128,6 +129,33 @@ do {
     view.restyleIfMarkdown()
     check("deleting the hash takes the heading styling with it",
           ((attr(view, .font, 0) as? NSFont)?.pointSize ?? 0) == (bodyFont?.pointSize ?? 0))
+}
+
+print("\nMarkdown notes — restyling as you type")
+do {
+    // The expensive path is re-reading the whole note on every keystroke, so the
+    // editor only re-reads the lines that changed. These check it still keeps up.
+    let view = makeView(.markdown, "one\ntwo\nthree")
+    view.setSelectedRange(NSRange(location: 7, length: 0))     // end of "two"
+    view.insertText(" **loud**", replacementRange: view.selectedRange())
+    let s = view.string as NSString
+    check("typing markdown styles it without a full restyle",
+          trait(view, s.range(of: "loud").location, .boldFontMask))
+    check("...and leaves the other lines alone", !trait(view, 0, .boldFontMask))
+
+    view.setSelectedRange(s.range(of: "**"))
+    view.insertText("", replacementRange: s.range(of: "**"))
+    check("deleting a mark takes its styling off the line",
+          !trait(view, (view.string as NSString).range(of: "loud").location, .boldFontMask),
+          view.string)
+
+    let pasted = makeView(.markdown, "")
+    pasted.insertText("**a**\n*b*\n~~c~~", replacementRange: NSRange(location: 0, length: 0))
+    let p = pasted.string as NSString
+    check("pasting several lines at once styles all of them",
+          trait(pasted, p.range(of: "a").location, .boldFontMask)
+          && trait(pasted, p.range(of: "b").location, .italicFontMask)
+          && (attr(pasted, .strikethroughStyle, p.range(of: "c").location) as? Int ?? 0) != 0)
 }
 
 print("\nRich text notes — shortcuts set the styling, not marks")

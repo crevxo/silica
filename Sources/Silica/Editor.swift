@@ -35,6 +35,7 @@ struct Editor: NSViewRepresentable {
 
         let textView = PlainTextView(frame: .zero, textContainer: container)
         textView.delegate = context.coordinator
+        storage.delegate = textView
         textView.isEditable = true
         textView.importsGraphics = false
         textView.allowsUndo = true
@@ -61,7 +62,8 @@ struct Editor: NSViewRepresentable {
         textView.format = format
         textView.isRichText = format == .richText
 
-        if context.coordinator.loadedNoteID != noteID {
+        let loadingNote = context.coordinator.loadedNoteID != noteID
+        if loadingNote {
             context.coordinator.loadedNoteID = noteID
             if let rich, format == .richText {
                 textView.textStorage?.setAttributedString(rich)
@@ -79,7 +81,13 @@ struct Editor: NSViewRepresentable {
             ))
         }
 
-        textView.applyStyle(fontSize: fontSize, palette: palette)
+        // SwiftUI re-runs this on every keystroke, and re-styling the document is
+        // far too expensive to repeat when none of its inputs moved.
+        let style = StyleInputs(fontSize: fontSize, palette: palette, format: format)
+        if loadingNote || context.coordinator.style != style {
+            context.coordinator.style = style
+            textView.applyStyle(fontSize: fontSize, palette: palette)
+        }
 
         // A search result hands over a range once; the token stops it being
         // re-applied on every later redraw.
@@ -104,16 +112,23 @@ struct Editor: NSViewRepresentable {
         textView.needsDisplay = true
     }
 
+    /// Everything `applyStyle` reads. Unchanged inputs mean nothing to redo.
+    struct StyleInputs: Equatable {
+        let fontSize: Double
+        let palette: Palette
+        let format: NoteFormat
+    }
+
     final class Coordinator: NSObject, NSTextViewDelegate {
         var parent: Editor
         var loadedNoteID: UUID?
         var appliedSelection: UUID?
+        var style: StyleInputs?
 
         init(_ parent: Editor) { self.parent = parent }
 
         func textDidChange(_ notification: Notification) {
             guard let textView = notification.object as? PlainTextView else { return }
-            textView.restyleIfMarkdown()
             parent.onChange(textView.string, textView.richSnapshot())
             if textView.typewriter { textView.centerCaret() }
         }
@@ -127,7 +142,7 @@ struct Editor: NSViewRepresentable {
 
 /// NSTextView with the app's paper baked in: plain text only, a placeholder, and
 /// an optional typewriter scroll that keeps the caret on the same line of glass.
-final class PlainTextView: NSTextView {
+final class PlainTextView: NSTextView, NSTextStorageDelegate {
     var placeholder = "Start writing…"
     var placeholderColor: NSColor = .secondaryLabelColor
     var typewriter = false
@@ -182,11 +197,27 @@ final class PlainTextView: NSTextView {
         if format == .markdown { restyleIfMarkdown() }
     }
 
-    /// Repaint the markdown as what it means. Cheap enough to run on every
-    /// keystroke, and a no-op for a rich-text note.
+    /// Repaint the whole note. Used when the font size or theme changes; ordinary
+    /// typing goes through the far cheaper per-line path below.
     func restyleIfMarkdown() {
         guard format == .markdown, let storage = textStorage else { return }
+        storage.beginEditing()
         MarkdownStyler.style(storage, baseFont: baseFont, ink: ink)
+        storage.endEditing()
+    }
+
+    /// The text storage reports exactly what changed, so only the lines that were
+    /// touched are re-read — typing in a long note costs the same as typing in a
+    /// short one.
+    func textStorage(
+        _ storage: NSTextStorage,
+        didProcessEditing editedMask: NSTextStorageEditActions,
+        range editedRange: NSRange,
+        changeInLength delta: Int
+    ) {
+        guard format == .markdown, editedMask.contains(.editedCharacters) else { return }
+        let lines = (storage.string as NSString).paragraphRange(for: editedRange)
+        MarkdownStyler.style(storage, baseFont: baseFont, ink: ink, in: lines)
     }
 
     /// The styled text to save, for a rich note only.

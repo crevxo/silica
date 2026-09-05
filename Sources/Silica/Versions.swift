@@ -17,6 +17,8 @@ final class VersionStore {
     private let keep = 30
 
     private var folder: URL
+    /// When each note was last snapshotted, so the common case needs no disk read.
+    private var lastSnapshot: [URL: Date] = [:]
 
     init(libraryFolder: URL) {
         folder = VersionStore.folder(in: libraryFolder)
@@ -24,6 +26,7 @@ final class VersionStore {
 
     func relocate(to libraryFolder: URL) {
         folder = VersionStore.folder(in: libraryFolder)
+        lastSnapshot.removeAll()
     }
 
     /// History written before the app was renamed lives under the old name; it is
@@ -91,11 +94,19 @@ final class VersionStore {
     /// differs from the newest snapshot, so an idle app writes nothing.
     func snapshotIfNeeded(_ note: Note, force: Bool = false) {
         guard !note.text.isEmpty else { return }
-        let existing = versions(for: note)
 
+        // Saves land every 600ms of typing; snapshots are five minutes apart. Most
+        // calls can be answered from memory without touching the disk at all.
+        if !force, let last = lastSnapshot[note.url], Date().timeIntervalSince(last) < interval { return }
+
+        let existing = versions(for: note)
         if let newest = existing.first {
+            // Cheapest test first: the interval is a date, the comparison is a file.
+            if !force, Date().timeIntervalSince(newest.date) < interval {
+                lastSnapshot[note.url] = newest.date
+                return
+            }
             if text(of: newest) == note.text { return }
-            if !force, Date().timeIntervalSince(newest.date) < interval { return }
         }
 
         let dir = folder(for: note)
@@ -111,6 +122,7 @@ final class VersionStore {
             atomically: true,
             encoding: .utf8
         )
+        lastSnapshot[note.url] = Date(timeIntervalSince1970: timestamp)
 
         for old in existing.dropFirst(keep - 1) {
             try? FileManager.default.removeItem(at: old.url)
@@ -121,6 +133,7 @@ final class VersionStore {
     func rename(from old: URL, to new: URL) {
         let source = folder.appendingPathComponent(old.deletingPathExtension().lastPathComponent)
         let dest = folder.appendingPathComponent(new.deletingPathExtension().lastPathComponent)
+        lastSnapshot[new] = lastSnapshot.removeValue(forKey: old)
         guard FileManager.default.fileExists(atPath: source.path) else { return }
         try? FileManager.default.moveItem(at: source, to: dest)
     }
