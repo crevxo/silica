@@ -24,7 +24,7 @@ struct VersionHistorySheet: View {
                     .foregroundStyle(palette.ink)
                 Spacer()
                 Text("\(list.count) saved versions")
-                    .font(.system(size: 11, design: .monospaced))
+                    .font(.system(size: 11, weight: .medium))
                     .foregroundStyle(palette.inkSoft)
             }
             .padding(.horizontal, 16)

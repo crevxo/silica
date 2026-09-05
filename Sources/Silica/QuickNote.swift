@@ -174,7 +174,7 @@ private struct QuickNotePanel: View {
 
             HStack {
                 Text("⌘⏎ to keep")
-                    .font(.system(size: 10.5, design: .monospaced))
+                    .font(.system(size: 10.5, weight: .medium))
                     .foregroundStyle(palette.inkSoft)
                 Spacer()
                 Button("Save to Silica") { quickNote.promoteToNote() }
