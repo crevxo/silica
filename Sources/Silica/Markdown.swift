@@ -47,6 +47,17 @@ enum MarkdownStyler {
     }
 
     private static let manager = NSFontManager.shared
+    private static var traitCache: [String: NSFont] = [:]
+
+    /// `convert(_:toHaveTrait:)` walks the font table every time it is asked; the
+    /// same few answers recur thousands of times while typing.
+    private static func withTrait(_ font: NSFont, _ trait: NSFontTraitMask) -> NSFont {
+        let key = "\(font.fontName)|\(font.pointSize)|\(trait.rawValue)"
+        if let cached = traitCache[key] { return cached }
+        let converted = manager.convert(font, toHaveTrait: trait)
+        traitCache[key] = converted
+        return converted
+    }
 
     private static func inner(of range: NSRange, opening: Int, closing: Int) -> NSRange {
         NSRange(location: range.location + opening, length: max(0, range.length - opening - closing))
@@ -55,7 +66,7 @@ enum MarkdownStyler {
     private static func addTrait(_ trait: NSFontTraitMask, _ storage: NSMutableAttributedString, _ range: NSRange, _ base: NSFont) {
         storage.enumerateAttribute(.font, in: range) { value, subrange, _ in
             let font = (value as? NSFont) ?? base
-            storage.addAttribute(.font, value: manager.convert(font, toHaveTrait: trait), range: subrange)
+            storage.addAttribute(.font, value: withTrait(font, trait), range: subrange)
         }
     }
 
@@ -64,7 +75,7 @@ enum MarkdownStyler {
         Rule(regex: regex("^(#{1,6})[ \\t]+(.+)$", multiline: true)) { storage, range, base in
             let level = min(3, max(1, storage.attributedSubstring(from: range).string.prefix { $0 == "#" }.count))
             let scale = [1.55, 1.32, 1.15][level - 1]
-            let font = manager.convert(NSFont.systemFont(ofSize: base.pointSize * scale), toHaveTrait: .boldFontMask)
+            let font = withTrait(NSFont.systemFont(ofSize: base.pointSize * scale), .boldFontMask)
             storage.addAttribute(.font, value: font, range: range)
         },
         Rule(regex: regex("\\*\\*(?:(?!\\*\\*).)+\\*\\*")) { storage, range, base in
@@ -98,28 +109,32 @@ enum MarkdownStyler {
         multiline: true
     )
 
-    static func style(_ storage: NSTextStorage, baseFont: NSFont, ink: NSColor) {
-        let full = NSRange(location: 0, length: storage.length)
-        guard full.length > 0, full.length < sizeLimit else { return }
+    /// Restyles `range`, which the caller widens to whole lines. Every pattern
+    /// here lives inside one line, so a line is all that ever needs re-reading —
+    /// typing in a long note does not re-scan the note.
+    static func style(_ storage: NSTextStorage, baseFont: NSFont, ink: NSColor, in range: NSRange? = nil) {
+        let document = NSRange(location: 0, length: storage.length)
+        guard document.length > 0, document.length < sizeLimit else { return }
+        let scope = range.map { NSIntersectionRange($0, document) } ?? document
+        guard scope.length > 0 else { return }
         let text = storage.string
 
-        storage.beginEditing()
         // Start from a clean slate so deleting a mark takes its styling with it.
-        storage.removeAttribute(.strikethroughStyle, range: full)
-        storage.removeAttribute(.underlineStyle, range: full)
-        storage.addAttribute(.font, value: baseFont, range: full)
-        storage.addAttribute(.foregroundColor, value: ink, range: full)
+        storage.removeAttribute(.strikethroughStyle, range: scope)
+        storage.removeAttribute(.underlineStyle, range: scope)
+        storage.addAttribute(.font, value: baseFont, range: scope)
+        storage.addAttribute(.foregroundColor, value: ink, range: scope)
 
         for rule in rules {
-            for match in rule.regex.matches(in: text, range: full) {
+            for match in rule.regex.matches(in: text, range: scope) {
                 rule.style(storage as NSMutableAttributedString, match.range, baseFont)
             }
         }
 
         // Dim the syntax last, so it fades no matter which rule claimed the span.
-        for match in markPattern.matches(in: text, range: full) {
-            storage.addAttribute(.foregroundColor, value: ink.withAlphaComponent(0.28), range: match.range)
+        let dimmed = ink.withAlphaComponent(0.28)
+        for match in markPattern.matches(in: text, range: scope) {
+            storage.addAttribute(.foregroundColor, value: dimmed, range: match.range)
         }
-        storage.endEditing()
     }
 }

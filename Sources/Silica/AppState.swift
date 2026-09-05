@@ -187,8 +187,20 @@ final class AppState: ObservableObject {
         scheduleSave(id)
     }
 
+    /// Counted in one pass. `split` builds an array of every word in the note,
+    /// and this runs twice on every keystroke.
     static func wordCount(_ text: String) -> Int {
-        text.split(whereSeparator: { $0.isWhitespace || $0.isNewline }).count
+        var count = 0
+        var inWord = false
+        for character in text.unicodeScalars {
+            if CharacterSet.whitespacesAndNewlines.contains(character) {
+                inWord = false
+            } else if !inWord {
+                inWord = true
+                count += 1
+            }
+        }
+        return count
     }
 
     private func addWordsToday(_ count: Int) {

@@ -1,7 +1,9 @@
 import SwiftUI
 
 struct SearchHit: Identifiable, Hashable {
-    let id = UUID()
+    /// Derived rather than fresh: a hit at the same place in the same note is the
+    /// same row, so the results list stops rebuilding itself on every keystroke.
+    var id: String { "\(noteID)@\(offset)" }
     let noteID: UUID
     let noteTitle: String
     let line: String
