@@ -17,14 +17,17 @@ final class VersionStore {
     private let keep = 30
 
     private var folder: URL
+    private var libraryFolder: URL
     /// When each note was last snapshotted, so the common case needs no disk read.
     private var lastSnapshot: [URL: Date] = [:]
 
     init(libraryFolder: URL) {
+        self.libraryFolder = libraryFolder.standardizedFileURL
         folder = VersionStore.folder(in: libraryFolder)
     }
 
     func relocate(to libraryFolder: URL) {
+        self.libraryFolder = libraryFolder.standardizedFileURL
         folder = VersionStore.folder(in: libraryFolder)
         lastSnapshot.removeAll()
     }
@@ -66,9 +69,23 @@ final class VersionStore {
     }
 
     private func folder(for note: Note) -> URL {
-        // Keyed by filename so a note's history follows it, and edits made in
-        // another editor still land in the same pile.
-        folder.appendingPathComponent(note.url.deletingPathExtension().lastPathComponent)
+        folder.appendingPathComponent(pile(for: note.url))
+    }
+
+    /// Keyed by filename so a note's history follows it, and edits made in
+    /// another editor still land in the same pile. A file opened from outside
+    /// the library carries its folder in the key so it never shares a pile
+    /// with a library note of the same name.
+    private func pile(for url: URL) -> String {
+        let standard = url.standardizedFileURL
+        let stem = standard.deletingPathExtension().lastPathComponent
+        let parent = standard.deletingLastPathComponent()
+        guard parent != libraryFolder else { return stem }
+        // A stable hash: Swift's hashValue is re-seeded on every launch, which
+        // would give the file a fresh history folder each time it is opened.
+        var h: UInt32 = 5381
+        for byte in parent.path.utf8 { h = (h &* 33) &+ UInt32(byte) }
+        return "\(stem)@\(String(format: "%08x", h))"
     }
 
     func versions(for note: Note) -> [Version] {
@@ -131,8 +148,8 @@ final class VersionStore {
 
     /// Renaming a note moves its history with it, so history is never orphaned.
     func rename(from old: URL, to new: URL) {
-        let source = folder.appendingPathComponent(old.deletingPathExtension().lastPathComponent)
-        let dest = folder.appendingPathComponent(new.deletingPathExtension().lastPathComponent)
+        let source = folder.appendingPathComponent(pile(for: old))
+        let dest = folder.appendingPathComponent(pile(for: new))
         lastSnapshot[new] = lastSnapshot.removeValue(forKey: old)
         guard FileManager.default.fileExists(atPath: source.path) else { return }
         try? FileManager.default.moveItem(at: source, to: dest)

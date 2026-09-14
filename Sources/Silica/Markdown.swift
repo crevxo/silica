@@ -28,8 +28,8 @@ enum NoteFormat: String, Codable, CaseIterable, Identifiable {
 }
 
 /// Draws markdown as what it means while leaving it as what it is. The asterisks
-/// stay in the file — and stay on screen, dimmed — but the text between them is
-/// bold, italic, struck through or underlined as you type.
+/// stay in the file, but on screen they are hidden everywhere except the line the
+/// caret is on, where they show dimmed so they can still be edited.
 enum MarkdownStyler {
     /// Past this the whole-document restyle on every keystroke stops being free.
     private static let sizeLimit = 200_000
@@ -38,6 +38,19 @@ enum MarkdownStyler {
         let regex: NSRegularExpression
         /// Applied to the text between the marks.
         let style: (NSMutableAttributedString, NSRange, NSFont) -> Void
+        /// The syntax this match owns, as sub-ranges of the match. Only marks a
+        /// rule actually paired are ever hidden; a stray `*` or a bullet stays.
+        let marks: (NSTextCheckingResult) -> [NSRange]
+    }
+
+    private static func edges(_ opening: Int, _ closing: Int) -> (NSTextCheckingResult) -> [NSRange] {
+        { match in
+            let r = match.range
+            return [
+                NSRange(location: r.location, length: opening),
+                NSRange(location: NSMaxRange(r) - closing, length: closing)
+            ]
+        }
     }
 
     private static func regex(_ pattern: String, multiline: Bool = false) -> NSRegularExpression {
@@ -72,34 +85,35 @@ enum MarkdownStyler {
 
     private static let rules: [Rule] = [
         // Headings: the whole line, hashes included, grows and goes bold.
-        Rule(regex: regex("^(#{1,6})[ \\t]+(.+)$", multiline: true)) { storage, range, base in
+        Rule(regex: regex("^(#{1,6}[ \\t]+)(\\S.*)$", multiline: true), style: { storage, range, base in
             let level = min(3, max(1, storage.attributedSubstring(from: range).string.prefix { $0 == "#" }.count))
             let scale = [1.55, 1.32, 1.15][level - 1]
-            let font = withTrait(NSFont.systemFont(ofSize: base.pointSize * scale), .boldFontMask)
+            let sized = NSFont(descriptor: base.fontDescriptor, size: base.pointSize * scale) ?? base
+            let font = withTrait(sized, .boldFontMask)
             storage.addAttribute(.font, value: font, range: range)
-        },
-        Rule(regex: regex("\\*\\*(?:(?!\\*\\*).)+\\*\\*")) { storage, range, base in
+        }, marks: { [$0.range(at: 1)] }),
+        Rule(regex: regex("\\*\\*(?:(?!\\*\\*).)+\\*\\*"), style: { storage, range, base in
             addTrait(.boldFontMask, storage, range, base)
-        },
-        Rule(regex: regex("(?<![\\*\\w])\\*(?!\\*)[^\\*\\n]+(?<!\\*)\\*(?!\\*)")) { storage, range, base in
+        }, marks: edges(2, 2)),
+        Rule(regex: regex("(?<![\\*\\w])\\*(?!\\*)[^\\*\\n]+(?<!\\*)\\*(?!\\*)"), style: { storage, range, base in
             addTrait(.italicFontMask, storage, range, base)
-        },
+        }, marks: edges(1, 1)),
         // The line goes through the words, not through the marks that ask for it.
-        Rule(regex: regex("~~(?:(?!~~).)+~~")) { storage, range, _ in
+        Rule(regex: regex("~~(?:(?!~~).)+~~"), style: { storage, range, _ in
             storage.addAttribute(.strikethroughStyle, value: NSUnderlineStyle.single.rawValue, range: inner(of: range, opening: 2, closing: 2))
-        },
-        Rule(regex: regex("<u>(?:(?!</u>).)+</u>")) { storage, range, _ in
+        }, marks: edges(2, 2)),
+        Rule(regex: regex("<u>(?:(?!</u>).)+</u>"), style: { storage, range, _ in
             storage.addAttribute(.underlineStyle, value: NSUnderlineStyle.single.rawValue, range: inner(of: range, opening: 3, closing: 4))
-        },
-        Rule(regex: regex("`[^`\\n]+`")) { storage, range, base in
+        }, marks: edges(3, 4)),
+        Rule(regex: regex("`[^`\\n]+`"), style: { storage, range, base in
             storage.addAttribute(.font, value: NSFont.monospacedSystemFont(ofSize: base.pointSize * 0.94, weight: .regular), range: range)
-        }
+        }, marks: edges(1, 1))
     ]
 
     /// The marks themselves — everything that is syntax rather than writing.
     private static let markPattern = regex(
         [
-            "^#{1,6}(?=[ \\t])",     // heading hashes
+            "^#{1,6}[ \\t]+",         // heading hashes and the gap after them
             "\\*\\*",                 // bold
             "(?<![\\*\\w])\\*(?!\\*)|(?<!\\*)\\*(?![\\*\\w])", // italic
             "~~",                     // strikethrough
@@ -112,7 +126,20 @@ enum MarkdownStyler {
     /// Restyles `range`, which the caller widens to whole lines. Every pattern
     /// here lives inside one line, so a line is all that ever needs re-reading —
     /// typing in a long note does not re-scan the note.
-    static func style(_ storage: NSTextStorage, baseFont: NSFont, ink: NSColor, in range: NSRange? = nil) {
+    /// Fonts this small are the closest TextKit gets to a hidden character: the
+    /// mark keeps its place in the string but takes up no visible room.
+    private static let hiddenFont = NSFont.systemFont(ofSize: 0.1)
+
+    /// `reveal` is the paragraph range the caret is in; marks there are dimmed
+    /// rather than hidden. Pass nil to hide none (`hideMarks` false) or all.
+    static func style(
+        _ storage: NSTextStorage,
+        baseFont: NSFont,
+        ink: NSColor,
+        hideMarks: Bool = false,
+        reveal: NSRange? = nil,
+        in range: NSRange? = nil
+    ) {
         let document = NSRange(location: 0, length: storage.length)
         guard document.length > 0, document.length < sizeLimit else { return }
         let scope = range.map { NSIntersectionRange($0, document) } ?? document
@@ -125,9 +152,11 @@ enum MarkdownStyler {
         storage.addAttribute(.font, value: baseFont, range: scope)
         storage.addAttribute(.foregroundColor, value: ink, range: scope)
 
+        var owned: [NSRange] = []
         for rule in rules {
             for match in rule.regex.matches(in: text, range: scope) {
                 rule.style(storage as NSMutableAttributedString, match.range, baseFont)
+                owned.append(contentsOf: rule.marks(match))
             }
         }
 
@@ -135,6 +164,17 @@ enum MarkdownStyler {
         let dimmed = ink.withAlphaComponent(0.28)
         for match in markPattern.matches(in: text, range: scope) {
             storage.addAttribute(.foregroundColor, value: dimmed, range: match.range)
+        }
+
+        // Then fold away the marks a rule paired, except on the caret's line. An
+        // unpaired mark (a bullet, `2 * 3`, a lone backtick) is writing, not
+        // syntax, and stays put.
+        guard hideMarks else { return }
+        for mark in owned where mark.length > 0 {
+            let onCaretLine = reveal.map { NSIntersectionRange($0, mark).length > 0 || NSLocationInRange(mark.location, $0) } ?? false
+            if !onCaretLine {
+                storage.addAttributes([.font: hiddenFont, .foregroundColor: NSColor.clear], range: mark)
+            }
         }
     }
 }

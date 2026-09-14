@@ -9,7 +9,10 @@ struct SilicaApp: App {
     @StateObject private var state = AppState()
 
     var body: some Scene {
-        WindowGroup {
+        // One editor window, ever. A `WindowGroup` would also open a second
+        // window of its own for every file Finder hands us, on top of the tab
+        // the delegate makes for it.
+        Window("Silica", id: "main") {
             MainWindow()
                 .environmentObject(state)
                 .frame(minWidth: 420, minHeight: 300)
@@ -18,6 +21,10 @@ struct SilicaApp: App {
         .windowStyle(.hiddenTitleBar)
         .defaultSize(width: 660, height: 520)
         .commands { SilicaCommands(state: state) }
+
+        Settings {
+            SettingsWindow().environmentObject(state)
+        }
     }
 }
 
@@ -54,7 +61,7 @@ struct SilicaCommands: Commands {
             Divider()
             Button("Export as Markdown…") { Export.markdown(state.active) }
                 .keyboardShortcut("e", modifiers: [.command, .shift])
-            Button("Export as PDF…") { Export.pdf(state.active, fontSize: state.fontSize) }
+            Button("Export as PDF…") { Export.pdf(state.active, fontSize: state.fontSize, fontFamily: state.fontFamily) }
                 .keyboardShortcut("p", modifiers: [.command, .option])
             Divider()
             Button("Reveal Library in Finder") { state.revealFolder() }
@@ -129,7 +136,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     static private(set) var shared: AppDelegate?
 
     let quickNote = QuickNote()
+    /// The editor window, as told to us by the view inside it. Found this way
+    /// rather than as "the first non-panel window" because the Settings window
+    /// is also a plain window and must not be restyled as the editor.
+    weak var mainWindow: NSWindow? {
+        didSet { if let state { style(for: state.appearance, resolved: state.resolvedAppearance) } }
+    }
     private var state: AppState?
+    /// Files Finder asked us to open before the state existed to open them in.
+    private var pendingOpens: [URL] = []
     private var cancellables = Set<AnyCancellable>()
     private var configured = false
     private lazy var updaterController: SPUStandardUpdaterController? = {
@@ -143,9 +158,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     var updatesAvailable: Bool { UpdateConfiguration.isConfigured }
 
+    private var termSignal: DispatchSourceSignal?
+
     func applicationDidFinishLaunching(_ notification: Notification) {
         AppDelegate.shared = self
         NSApp.setActivationPolicy(.regular)
+
+        // A plain SIGTERM (Activity Monitor, `kill`, logout) would skip
+        // applicationWillTerminate and drop the last 600 ms of typing; turn it
+        // into an ordinary quit so everything is flushed.
+        signal(SIGTERM, SIG_IGN)
+        let source = DispatchSource.makeSignalSource(signal: SIGTERM, queue: .main)
+        source.setEventHandler { NSApp.terminate(nil) }
+        source.resume()
+        termSignal = source
     }
 
     func adopt(_ state: AppState) {
@@ -153,6 +179,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         configured = true
         self.state = state
         quickNote.install(state: state)
+        if !pendingOpens.isEmpty {
+            state.open(pendingOpens)
+            pendingOpens = []
+        }
         // Constructing the controller starts Sparkle's scheduled update cycle.
         // It remains nil in development builds without a public signing key.
         _ = updaterController
@@ -172,8 +202,38 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
+    /// Finder: double-click, Open With, or a drop on the Dock icon.
+    func application(_ application: NSApplication, open urls: [URL]) {
+        if let state {
+            state.open(urls)
+            showEditor()
+        } else {
+            pendingOpens.append(contentsOf: urls)
+        }
+    }
+
+    /// Show the editor window. If the user closed it (the app keeps running
+    /// without one), ask SwiftUI to make it again the same way a Dock click
+    /// does: a reopen event sent to ourselves.
+    func showEditor() {
+        NSApp.activate(ignoringOtherApps: true)
+        if let mainWindow {
+            mainWindow.makeKeyAndOrderFront(nil)
+            return
+        }
+        let target = NSAppleEventDescriptor(processIdentifier: ProcessInfo.processInfo.processIdentifier)
+        let event = NSAppleEventDescriptor(
+            eventClass: AEEventClass(kCoreEventClass),
+            eventID: AEEventID(kAEReopenApplication),
+            targetDescriptor: target,
+            returnID: AEReturnID(kAutoGenerateReturnID),
+            transactionID: AETransactionID(kAnyTransactionID)
+        )
+        _ = try? event.sendEvent(options: [.noReply], timeout: 1)
+    }
+
     private func style(for appearance: Appearance, resolved: Appearance) {
-        guard let window = NSApp.windows.first(where: { !($0 is NSPanel) }) else { return }
+        guard let window = mainWindow else { return }
         window.appearance = appearance.nsAppearance
         window.backgroundColor = Palette.of(resolved).nsBackground
         window.titlebarAppearsTransparent = true
@@ -196,7 +256,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
-        if !flag { NSApp.windows.first(where: { !($0 is NSPanel) })?.makeKeyAndOrderFront(nil) }
+        if !flag { mainWindow?.makeKeyAndOrderFront(nil) }
         return true
     }
 }

@@ -2,6 +2,7 @@ import SwiftUI
 
 struct MainWindow: View {
     @EnvironmentObject var state: AppState
+    @State private var trafficLights = TrafficLightMetrics()
 
     var body: some View {
         let palette = state.palette
@@ -30,10 +31,12 @@ struct MainWindow: View {
             VersionHistorySheet().environmentObject(state)
         }
         .background(palette.background)
+        .background(TrafficLightReader(metrics: $trafficLights))
         // The tab row has to reach the traffic lights, so the view is allowed under
         // the titlebar instead of stopping at SwiftUI's top safe area.
         .ignoresSafeArea(.container, edges: .top)
         .environment(\.palette, palette)
+        .environment(\.trafficLights, trafficLights)
         .preferredColorScheme(state.resolvedAppearance == .light ? .light : .dark)
         .onReceive(NotificationCenter.default.publisher(for: .silicaEscape)) { _ in
             if state.focusMode { state.toggleFocus() }
@@ -49,6 +52,8 @@ struct MainWindow: View {
                 rich: note.rich,
                 format: note.format,
                 fontSize: state.fontSize,
+                fontFamily: state.fontFamily,
+                hideMarks: state.hideMarkdownSyntax,
                 palette: state.palette,
                 typewriter: state.typewriterMode,
                 selection: state.pendingSelection,
@@ -135,11 +140,16 @@ private struct FocusExitBar: View {
 struct TabBar: View {
     @EnvironmentObject var state: AppState
     @Environment(\.palette) private var palette
+    @Environment(\.trafficLights) private var lights
+
+    /// The row is this tall and centred on the traffic lights, whatever size
+    /// this release of macOS draws them.
+    private let rowHeight: CGFloat = 28
 
     var body: some View {
         HStack(spacing: 8) {
             // Room for the traffic lights, which the window draws itself.
-            Spacer().frame(width: 70)
+            Spacer().frame(width: max(0, lights.trailingEdge + 10 - 12))
 
             if state.tabsVisible {
                 ScrollView(.horizontal, showsIndicators: false) {
@@ -163,12 +173,10 @@ struct TabBar: View {
 
             OverflowMenu()
         }
+        .frame(height: rowHeight)
         .padding(.horizontal, 12)
-        // The traffic lights sit 14pt down from the top of the window and the app
-        // does not draw them, so the tab row hangs from the top to meet them
-        // instead of centring in a band of its own.
-        .padding(.top, 5)
-        .padding(.bottom, 18)
+        .padding(.top, max(4, lights.centerY - rowHeight / 2))
+        .padding(.bottom, 14)
         .background(palette.background)
     }
 
@@ -229,8 +237,11 @@ private struct TabPill: View {
         }
         .contentShape(Rectangle())
         .onHover { hovering = $0 }
-        .onTapGesture(count: 2) { state.renamingID = note.id }
+        // The single tap must not wait for the double-click window to close,
+        // or every tab switch lags by a beat. Both fire; a double-click
+        // selects and then renames.
         .onTapGesture { state.select(note.id) }
+        .simultaneousGesture(TapGesture(count: 2).onEnded { state.renamingID = note.id })
         .contextMenu {
             Button("Rename") { state.renamingID = note.id }
             Button("Duplicate") { state.select(note.id); state.duplicateActive() }
@@ -262,10 +273,10 @@ private struct OverflowMenu: View {
             Divider()
             Button(state.focusMode ? "Leave Focus Mode" : "Focus Mode") { state.toggleFocus() }
             Button(state.tabsVisible ? "Hide Tabs" : "Show Tabs") { state.toggleTabs() }
-            Button(state.appearance == .light ? "Dark Appearance" : "Light Appearance") { state.toggleAppearance() }
+            Button(state.resolvedAppearance == .light ? "Dark Appearance" : "Light Appearance") { state.toggleAppearance() }
             Divider()
             Button("Export as Markdown…") { Export.markdown(state.active) }
-            Button("Export as PDF…") { Export.pdf(state.active, fontSize: state.fontSize) }
+            Button("Export as PDF…") { Export.pdf(state.active, fontSize: state.fontSize, fontFamily: state.fontFamily) }
             Divider()
             Button("Reveal Library in Finder") { state.revealFolder() }
         } label: {
@@ -306,7 +317,7 @@ struct IconButton: View {
 struct StatusBar: View {
     @EnvironmentObject var state: AppState
     @Environment(\.palette) private var palette
-    @State private var showingSettings = false
+    @Environment(\.openSettings) private var openSettings
 
     var body: some View {
         HStack {
@@ -314,10 +325,7 @@ struct StatusBar: View {
                 .font(.system(size: 11, weight: .medium))
                 .foregroundStyle(palette.inkSoft)
             Spacer()
-            IconButton(systemName: "gearshape", help: "Settings") { showingSettings.toggle() }
-                .popover(isPresented: $showingSettings, arrowEdge: .top) {
-                    SettingsPopover().environmentObject(state)
-                }
+            IconButton(systemName: "gearshape", help: "Settings (⌘,)") { openSettings() }
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 7)
