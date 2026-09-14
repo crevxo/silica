@@ -11,6 +11,8 @@ struct Editor: NSViewRepresentable {
     let rich: NSAttributedString?
     let format: NoteFormat
     let fontSize: Double
+    let fontFamily: String
+    let hideMarks: Bool
     let palette: Palette
     let typewriter: Bool
     let selection: PendingSelection?
@@ -65,11 +67,15 @@ struct Editor: NSViewRepresentable {
         let loadingNote = context.coordinator.loadedNoteID != noteID
         if loadingNote {
             context.coordinator.loadedNoteID = noteID
+            // `applyStyle` below restyles the whole note once; the storage
+            // delegate must not do it a second time on the way in.
+            textView.loading = true
             if let rich, format == .richText {
                 textView.textStorage?.setAttributedString(rich)
             } else {
                 textView.string = text
             }
+            textView.loading = false
             textView.setSelectedRange(NSRange(location: text.utf16.count, length: 0))
             scroll.contentView.scroll(to: .zero)
         } else if textView.string != text {
@@ -83,10 +89,11 @@ struct Editor: NSViewRepresentable {
 
         // SwiftUI re-runs this on every keystroke, and re-styling the document is
         // far too expensive to repeat when none of its inputs moved.
-        let style = StyleInputs(fontSize: fontSize, palette: palette, format: format)
+        let style = StyleInputs(fontSize: fontSize, fontFamily: fontFamily, hideMarks: hideMarks, palette: palette, format: format)
         if loadingNote || context.coordinator.style != style {
             context.coordinator.style = style
-            textView.applyStyle(fontSize: fontSize, palette: palette)
+            textView.hideMarks = hideMarks
+            textView.applyStyle(fontSize: fontSize, fontFamily: fontFamily, palette: palette)
         }
 
         // A search result hands over a range once; the token stops it being
@@ -115,6 +122,8 @@ struct Editor: NSViewRepresentable {
     /// Everything `applyStyle` reads. Unchanged inputs mean nothing to redo.
     struct StyleInputs: Equatable {
         let fontSize: Double
+        let fontFamily: String
+        let hideMarks: Bool
         let palette: Palette
         let format: NoteFormat
     }
@@ -134,8 +143,9 @@ struct Editor: NSViewRepresentable {
         }
 
         func textViewDidChangeSelection(_ notification: Notification) {
-            guard let textView = notification.object as? PlainTextView, textView.typewriter else { return }
-            textView.centerCaret()
+            guard let textView = notification.object as? PlainTextView else { return }
+            textView.caretMoved()
+            if textView.typewriter { textView.centerCaret() }
         }
     }
 }
@@ -147,11 +157,37 @@ final class PlainTextView: NSTextView, NSTextStorageDelegate {
     var placeholderColor: NSColor = .secondaryLabelColor
     var typewriter = false
     var format: NoteFormat = .markdown
+    /// Markdown syntax is hidden except on the line the caret is on.
+    var hideMarks = false
+    /// Set while a note is being swapped in, so the per-edit restyle stays out
+    /// of the way of the full one that follows.
+    var loading = false
     private var baseFont = NSFont.systemFont(ofSize: 14)
     private var ink = NSColor.textColor
+    /// The paragraph whose marks are currently shown, so moving the caret only
+    /// has to repaint the line it left and the line it landed on.
+    private var revealed = NSRange(location: 0, length: 0)
 
-    func applyStyle(fontSize: Double, palette: Palette) {
-        let font = NSFont.systemFont(ofSize: fontSize)
+    /// The paragraph range the caret sits in — what the styler is told to reveal.
+    private var caretParagraph: NSRange {
+        guard hideMarks, format == .markdown else { return NSRange(location: NSNotFound, length: 0) }
+        return (string as NSString).paragraphRange(for: selectedRange())
+    }
+
+    private var revealArgument: NSRange? {
+        let range = caretParagraph
+        return range.location == NSNotFound ? nil : range
+    }
+
+    static func font(family: String, size: Double) -> NSFont {
+        guard !family.isEmpty, let font = NSFont(name: family, size: size) else {
+            return NSFont.systemFont(ofSize: size)
+        }
+        return font
+    }
+
+    func applyStyle(fontSize: Double, fontFamily: String, palette: Palette) {
+        let font = PlainTextView.font(family: fontFamily, size: fontSize)
         let paragraph = NSMutableParagraphStyle()
         // The caret is AppKit's own, and it is exactly as tall as the line
         // fragment — so line spacing is added below the line rather than by
@@ -201,8 +237,24 @@ final class PlainTextView: NSTextView, NSTextStorageDelegate {
     /// typing goes through the far cheaper per-line path below.
     func restyleIfMarkdown() {
         guard format == .markdown, let storage = textStorage else { return }
+        revealed = caretParagraph
         storage.beginEditing()
-        MarkdownStyler.style(storage, baseFont: baseFont, ink: ink)
+        MarkdownStyler.style(storage, baseFont: baseFont, ink: ink, hideMarks: hideMarks, reveal: revealArgument)
+        storage.endEditing()
+    }
+
+    /// Repaint the line the caret left and the one it arrived on, so marks fold
+    /// away behind it and unfold ahead of it.
+    func caretMoved() {
+        guard hideMarks, format == .markdown, let storage = textStorage, storage.length > 0 else { return }
+        let now = caretParagraph
+        guard now != revealed else { return }
+        let before = revealed
+        revealed = now
+        storage.beginEditing()
+        for range in [before, now] where range.location != NSNotFound && range.length > 0 {
+            MarkdownStyler.style(storage, baseFont: baseFont, ink: ink, hideMarks: hideMarks, reveal: now, in: range)
+        }
         storage.endEditing()
     }
 
@@ -215,9 +267,13 @@ final class PlainTextView: NSTextView, NSTextStorageDelegate {
         range editedRange: NSRange,
         changeInLength delta: Int
     ) {
-        guard format == .markdown, editedMask.contains(.editedCharacters) else { return }
+        guard format == .markdown, !loading, editedMask.contains(.editedCharacters) else { return }
         let lines = (storage.string as NSString).paragraphRange(for: editedRange)
-        MarkdownStyler.style(storage, baseFont: baseFont, ink: ink, in: lines)
+        // The selection has not caught up with the edit yet; the edited line is
+        // where the caret is about to be, so it is the line to reveal.
+        let reveal = hideMarks ? lines : nil
+        revealed = reveal ?? NSRange(location: NSNotFound, length: 0)
+        MarkdownStyler.style(storage, baseFont: baseFont, ink: ink, hideMarks: hideMarks, reveal: reveal, in: lines)
     }
 
     /// The styled text to save, for a rich note only.

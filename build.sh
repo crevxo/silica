@@ -55,10 +55,22 @@ cat > "$APP/Contents/Info.plist" <<PLIST
     <key>CFBundleDocumentTypes</key>
     <array>
         <dict>
-            <key>CFBundleTypeName</key><string>Plain Text</string>
+            <key>CFBundleTypeName</key><string>Markdown</string>
             <key>CFBundleTypeRole</key><string>Editor</string>
+            <key>LSHandlerRank</key><string>Alternate</string>
             <key>LSItemContentTypes</key>
-            <array><string>public.plain-text</string><string>net.daringfireball.markdown</string></array>
+            <array><string>net.daringfireball.markdown</string><string>public.plain-text</string><string>public.text</string></array>
+            <key>CFBundleTypeExtensions</key>
+            <array><string>md</string><string>markdown</string><string>txt</string></array>
+        </dict>
+        <dict>
+            <key>CFBundleTypeName</key><string>Rich Text</string>
+            <key>CFBundleTypeRole</key><string>Editor</string>
+            <key>LSHandlerRank</key><string>Alternate</string>
+            <key>LSItemContentTypes</key>
+            <array><string>public.rtf</string></array>
+            <key>CFBundleTypeExtensions</key>
+            <array><string>rtf</string></array>
         </dict>
     </array>
 </dict>
