@@ -33,7 +33,7 @@ func makeView(_ format: NoteFormat, _ text: String) -> PlainTextView {
     view.isRichText = format == .richText
     view.allowsUndo = true
     view.string = text
-    view.applyStyle(fontSize: 14, palette: Palette.light)
+    view.applyStyle(fontSize: 14, fontFamily: "", palette: Palette.light)
     return view
 }
 
