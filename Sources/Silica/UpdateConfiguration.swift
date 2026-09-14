@@ -15,6 +15,6 @@ enum UpdateConfiguration {
 
     static var version: String {
         let bundled = value(for: "CFBundleShortVersionString")
-        return bundled.isEmpty ? "1.0.1" : bundled
+        return bundled.isEmpty ? "1.1.0" : bundled
     }
 }
