@@ -45,26 +45,36 @@ final class QuickNote: NSObject, NSWindowDelegate {
     func show() {
         guard let state else { return }
         if panel == nil {
-            let panel = NSPanel(
-                contentRect: NSRect(x: 0, y: 0, width: 280, height: 220),
-                styleMask: [.titled, .closable, .fullSizeContentView, .nonactivatingPanel, .utilityWindow],
+            // Borderless: no titlebar and no traffic lights, just a card that
+            // hangs from the menu bar like a menu would. The card draws its own
+            // corners and shadow.
+            let panel = KeyablePanel(
+                contentRect: NSRect(x: 0, y: 0, width: QuickNotePanel.width, height: QuickNotePanel.height),
+                styleMask: [.borderless, .nonactivatingPanel, .fullSizeContentView],
                 backing: .buffered,
                 defer: false
             )
-            panel.titleVisibility = .hidden
-            panel.titlebarAppearsTransparent = true
+            panel.isOpaque = false
+            panel.backgroundColor = .clear
+            panel.hasShadow = true
             panel.isFloatingPanel = true
-            panel.level = .floating
+            panel.level = .popUpMenu
             panel.hidesOnDeactivate = false
             panel.isMovableByWindowBackground = true
+            panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
             panel.delegate = self
-            panel.contentView = NSHostingView(rootView: QuickNotePanel(quickNote: self).environmentObject(state))
+            panel.onEscape = { [weak self] in self?.close() }
+            let hosting = NSHostingView(rootView: QuickNotePanel(quickNote: self).environmentObject(state))
+            hosting.wantsLayer = true
+            hosting.layer?.backgroundColor = .clear
+            panel.contentView = hosting
             self.panel = panel
         }
 
         position()
+        // A non-activating panel takes the keyboard without bringing the rest
+        // of the app forward, so the editor window stays wherever it was.
         panel?.makeKeyAndOrderFront(nil)
-        NSApp.activate(ignoringOtherApps: true)
     }
 
     func close() {
@@ -80,7 +90,7 @@ final class QuickNote: NSObject, NSWindowDelegate {
         if let screen = NSScreen.main {
             x = min(max(x, screen.visibleFrame.minX + 8), screen.visibleFrame.maxX - size.width - 8)
         }
-        panel.setFrameTopLeftPoint(NSPoint(x: x, y: frame.minY - 6))
+        panel.setFrameTopLeftPoint(NSPoint(x: x, y: frame.minY - 4))
     }
 
     /// Push the scratch buffer into the library as its own note and clear it.
@@ -90,14 +100,19 @@ final class QuickNote: NSObject, NSWindowDelegate {
             .split(separator: "\n", omittingEmptySubsequences: true)
             .first
             .map(String.init) ?? "Quick Note"
-        var note = state.library.create(titled: String(firstLine.prefix(48)), avoiding: Set(state.notes.map(\.title)))
+        var note = state.library.create(
+            titled: String(firstLine.prefix(48)),
+            format: state.newNoteFormat,
+            avoiding: Set(state.notes.map(\.title))
+        )
         note.text = text
+        if note.format == .richText { note.rich = NSAttributedString(string: text, attributes: [.font: state.editorFont]) }
         state.library.write(note)
         state.notes.append(note)
         state.select(note.id)
         text = ""
         close()
-        NSApp.windows.first { !($0 is NSPanel) }?.makeKeyAndOrderFront(nil)
+        AppDelegate.shared?.showEditor()
     }
 
     // MARK: - Global hotkey (⌥⌘N)
@@ -126,7 +141,36 @@ final class QuickNote: NSObject, NSWindowDelegate {
     }
 }
 
+/// A borderless panel refuses key status by default, which would make it
+/// impossible to type into. Escape closes it, as it would a menu.
+private final class KeyablePanel: NSPanel {
+    var onEscape: (() -> Void)?
+    override var canBecomeKey: Bool { true }
+    override func cancelOperation(_ sender: Any?) { onEscape?() }
+
+    /// The panel takes keys without making Silica the active app, so the Edit
+    /// menu is not there to turn ⌘V into a paste. Do it here instead.
+    override func performKeyEquivalent(with event: NSEvent) -> Bool {
+        if super.performKeyEquivalent(with: event) { return true }
+        guard event.modifierFlags.intersection(.deviceIndependentFlagsMask).subtracting(.shift) == .command,
+              let responder = firstResponder else { return false }
+        let selector: Selector? = switch event.charactersIgnoringModifiers?.lowercased() {
+        case "v": #selector(NSText.paste(_:))
+        case "c": #selector(NSText.copy(_:))
+        case "x": #selector(NSText.cut(_:))
+        case "a": #selector(NSText.selectAll(_:))
+        case "z": event.modifierFlags.contains(.shift) ? Selector(("redo:")) : Selector(("undo:"))
+        default: nil
+        }
+        guard let selector else { return false }
+        return NSApp.sendAction(selector, to: responder, from: self)
+    }
+}
+
 private struct QuickNotePanel: View {
+    static let width: CGFloat = 250
+    static let height: CGFloat = 330
+
     let quickNote: QuickNote
     @EnvironmentObject var state: AppState
     @State private var text = ""
@@ -137,55 +181,56 @@ private struct QuickNotePanel: View {
         VStack(alignment: .leading, spacing: 0) {
             HStack {
                 Text("Quick Note")
-                    .font(.system(size: 12, weight: .semibold))
+                    .font(.system(size: 14, weight: .medium))
                     .foregroundStyle(palette.ink)
                 Spacer()
                 Button {
                     quickNote.close()
                 } label: {
                     Image(systemName: "xmark")
-                        .font(.system(size: 10, weight: .medium))
+                        .font(.system(size: 12, weight: .medium))
                         .foregroundStyle(palette.inkSoft)
+                        .frame(width: 22, height: 22)
+                        .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
             }
-            .padding(.horizontal, 10)
+            .padding(.leading, 14)
+            .padding(.trailing, 8)
             .padding(.vertical, 8)
 
             Divider().overlay(palette.line)
 
             TextEditor(text: $text)
-                .font(.system(size: 12.5))
+                .font(.system(size: 14))
+                .foregroundStyle(palette.ink)
                 .scrollContentBackground(.hidden)
-                .padding(.horizontal, 6)
-                .padding(.vertical, 4)
+                .padding(.horizontal, 9)
+                .padding(.vertical, 8)
                 .overlay(alignment: .topLeading) {
                     if text.isEmpty {
                         Text("Type a quick note…")
-                            .font(.system(size: 12.5))
+                            .font(.system(size: 14))
                             .foregroundStyle(palette.inkSoft)
-                            .padding(.horizontal, 11)
-                            .padding(.vertical, 10)
+                            .padding(.horizontal, 14)
+                            .padding(.vertical, 8)
                             .allowsHitTesting(false)
                     }
                 }
 
-            Divider().overlay(palette.line)
-
-            HStack {
-                Text("⌘⏎ to keep")
-                    .font(.system(size: 10.5, weight: .medium))
-                    .foregroundStyle(palette.inkSoft)
-                Spacer()
-                Button("Save to Silica") { quickNote.promoteToNote() }
-                    .controlSize(.small)
-                    .keyboardShortcut(.return, modifiers: .command)
-            }
-            .padding(.horizontal, 10)
-            .padding(.vertical, 8)
+            // Off screen but still wired: ⌘⏎ files the note in the library.
+            Button("Save to Silica") { quickNote.promoteToNote() }
+                .keyboardShortcut(.return, modifiers: .command)
+                .frame(width: 0, height: 0)
+                .opacity(0)
         }
-        .frame(width: 280, height: 220)
+        .frame(width: Self.width, height: Self.height)
         .background(palette.background)
+        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .strokeBorder(palette.pillBorder, lineWidth: 0.5)
+        }
         .preferredColorScheme(state.resolvedAppearance == .light ? .light : .dark)
         .onAppear { text = quickNote.text }
         .onChange(of: text) { _, new in quickNote.text = new }

@@ -10,9 +10,11 @@ or put it in a git repo.
 ## Features
 
 - Markdown and rich-text notes
-- Live Markdown styling as you type
+- Live Markdown styling as you type, with the syntax folded away except on the line you are editing
+- Settings window (⌘,) for font family, text size, theme, and library folder
 - Formatting shortcuts for bold, italic, underline, and strikethrough
 - Tabs that keep their order between launches
+- Open any `.md`, `.txt`, or `.rtf` from Finder; it becomes a tab and is edited in place
 - Search across every note with ⌘F
 - A Quick Note scratch pad from anywhere with ⌥⌘N
 - Version snapshots every five minutes, with the latest 30 kept per note

@@ -12,7 +12,7 @@ enum Export {
         try? note.text.write(to: url, atomically: true, encoding: .utf8)
     }
 
-    static func pdf(_ note: Note?, fontSize: Double) {
+    static func pdf(_ note: Note?, fontSize: Double, fontFamily: String = "") {
         guard let note else { return }
         let panel = NSSavePanel()
         panel.nameFieldStringValue = "\(note.title).pdf"
@@ -33,7 +33,7 @@ enum Export {
         textView.textStorage?.setAttributedString(NSAttributedString(
             string: note.text,
             attributes: [
-                .font: NSFont.systemFont(ofSize: fontSize),
+                .font: PlainTextView.font(family: fontFamily, size: fontSize),
                 .foregroundColor: NSColor.black,
                 .paragraphStyle: paragraph
             ]

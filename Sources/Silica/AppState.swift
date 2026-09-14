@@ -8,6 +8,10 @@ final class AppState: ObservableObject {
 
     @Published var appearance: Appearance { didSet { defaults.set(appearance.rawValue, forKey: "appearance") } }
     @Published var fontSize: Double { didSet { defaults.set(fontSize, forKey: "fontSize") } }
+    /// PostScript family name of the editor font; empty means the system font.
+    @Published var fontFamily: String { didSet { defaults.set(fontFamily, forKey: "fontFamily") } }
+    /// Fold markdown syntax away except on the line being edited.
+    @Published var hideMarkdownSyntax: Bool { didSet { defaults.set(hideMarkdownSyntax, forKey: "hideMarkdownSyntax") } }
     /// The format new notes are created in. Existing notes keep their own.
     @Published var newNoteFormat: NoteFormat { didSet { defaults.set(newNoteFormat.rawValue, forKey: "newNoteFormat") } }
     @Published var tabsVisible: Bool { didSet { defaults.set(tabsVisible, forKey: "tabsVisible") } }
@@ -48,6 +52,10 @@ final class AppState: ObservableObject {
 
     var palette: Palette { Palette.of(resolvedAppearance) }
 
+    /// The font plain text gets when it is turned into a rich note, so the note
+    /// is not stuck with RTF's Helvetica 12 default.
+    var editorFont: NSFont { PlainTextView.font(family: fontFamily, size: fontSize) }
+
     var active: Note? {
         get { notes.first { $0.id == activeID } }
         set {
@@ -60,6 +68,8 @@ final class AppState: ObservableObject {
         defaults.register(defaults: [
             "appearance": Appearance.light.rawValue,
             "fontSize": 14.0,
+            "fontFamily": "",
+            "hideMarkdownSyntax": true,
             "newNoteFormat": NoteFormat.markdown.rawValue,
             "tabsVisible": true,
             "focusMode": false,
@@ -68,6 +78,8 @@ final class AppState: ObservableObject {
         ])
         appearance = Appearance(rawValue: defaults.string(forKey: "appearance") ?? "") ?? .light
         fontSize = defaults.double(forKey: "fontSize")
+        fontFamily = defaults.string(forKey: "fontFamily") ?? ""
+        hideMarkdownSyntax = defaults.bool(forKey: "hideMarkdownSyntax")
         newNoteFormat = NoteFormat(rawValue: defaults.string(forKey: "newNoteFormat") ?? "") ?? .markdown
         tabsVisible = defaults.bool(forKey: "tabsVisible")
         focusMode = defaults.bool(forKey: "focusMode")
@@ -171,6 +183,29 @@ final class AppState: ObservableObject {
         select(notes[next].id)
     }
 
+    /// Open files from Finder (double-click, Open With, drag to the Dock icon).
+    /// Each one becomes a tab; a file that is already open is simply brought to
+    /// the front. Files outside the library are edited in place, where they are.
+    func open(_ urls: [URL]) {
+        for url in urls {
+            let standard = url.standardizedFileURL
+            if let i = notes.firstIndex(where: { $0.url.standardizedFileURL == standard }) {
+                // A tab that was never written shares its path with a file that
+                // has since appeared on disk; the file wins, not the blank tab.
+                if notes[i].text.isEmpty, let fresh = library.read(standard) {
+                    notes[i].text = fresh.text
+                    notes[i].rich = fresh.rich
+                }
+                activeID = notes[i].id
+                continue
+            }
+            guard let note = library.read(standard) else { continue }
+            notes.append(note)
+            activeID = note.id
+        }
+        persistIndex()
+    }
+
     // MARK: - Editing
 
     func updateText(_ text: String, rich: NSAttributedString? = nil, for id: UUID) {
@@ -228,7 +263,8 @@ final class AppState: ObservableObject {
 
     func rename(_ id: UUID, to title: String) {
         guard let i = notes.firstIndex(where: { $0.id == id }) else { return }
-        if let url = library.rename(notes[i], to: title) {
+        let others = Set(notes.filter { $0.id != id }.map(\.title))
+        if let url = library.rename(notes[i], to: title, avoiding: others) {
             versions.rename(from: notes[i].url, to: url)
             notes[i].url = url
             notes[i].title = url.deletingPathExtension().lastPathComponent
@@ -330,7 +366,7 @@ final class AppState: ObservableObject {
         // needs a matching attributed payload, otherwise `write` would save the
         // pre-restore RTF and silently undo the restore on the next launch.
         if notes[i].format == .richText {
-            notes[i].rich = NSAttributedString(string: restored)
+            notes[i].rich = NSAttributedString(string: restored, attributes: [.font: editorFont])
         }
         library.write(notes[i])
         showingHistory = false
