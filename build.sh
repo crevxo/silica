@@ -4,8 +4,8 @@ set -e
 cd "$(dirname "$0")"
 
 APP="dist/Silica.app"
-VERSION="${SILICA_VERSION:-1.1.1}"
-BUILD="${SILICA_BUILD:-4}"
+VERSION="${SILICA_VERSION:-1.2.0}"
+BUILD="${SILICA_BUILD:-5}"
 # Fill these in when the release repository and Sparkle signing key are ready.
 APPCAST_URL="${SILICA_APPCAST_URL:-https://github.com/crevxo/silica/releases/latest/download/appcast.xml}"
 PUBLIC_ED_KEY="${SILICA_PUBLIC_ED_KEY:-2y+EBTsESNugIHKjOp2ZP2njrnJmFVhiNZ864aPZ2MM=}"
