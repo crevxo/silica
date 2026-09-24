@@ -154,12 +154,27 @@ private final class KeyablePanel: NSPanel {
         if super.performKeyEquivalent(with: event) { return true }
         guard event.modifierFlags.intersection(.deviceIndependentFlagsMask).subtracting(.shift) == .command,
               let responder = firstResponder else { return false }
-        let selector: Selector? = switch event.charactersIgnoringModifiers?.lowercased() {
+        let key = event.charactersIgnoringModifiers?.lowercased()
+
+        // Undo is not one of these: a text view has no `undo:` of its own, it
+        // only keeps an undo manager, so asking it directly does nothing.
+        if key == "z" {
+            guard let manager = (responder as? NSTextView)?.undoManager ?? undoManager else { return false }
+            if event.modifierFlags.contains(.shift) {
+                guard manager.canRedo else { return false }
+                manager.redo()
+            } else {
+                guard manager.canUndo else { return false }
+                manager.undo()
+            }
+            return true
+        }
+
+        let selector: Selector? = switch key {
         case "v": #selector(NSText.paste(_:))
         case "c": #selector(NSText.copy(_:))
         case "x": #selector(NSText.cut(_:))
         case "a": #selector(NSText.selectAll(_:))
-        case "z": event.modifierFlags.contains(.shift) ? Selector(("redo:")) : Selector(("undo:"))
         default: nil
         }
         guard let selector else { return false }

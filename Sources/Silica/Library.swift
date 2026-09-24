@@ -44,9 +44,17 @@ final class Library {
         var active: String?
     }
 
+    /// One file can arrive as several different URLs — through a symlinked
+    /// folder, with or without a trailing slash, resolved or not. Comparing or
+    /// keying on the raw URL treats those as different files, so everything
+    /// goes through this form instead.
+    static func canonical(_ url: URL) -> String {
+        url.resolvingSymlinksInPath().standardizedFileURL.path
+    }
+
     /// True if `url` lives directly in the library folder.
     func contains(_ url: URL) -> Bool {
-        url.standardizedFileURL.deletingLastPathComponent() == folder.standardizedFileURL
+        Library.canonical(url.deletingLastPathComponent()) == Library.canonical(folder)
     }
 
     /// How a note is written into the index: a bare filename for library notes,
@@ -132,9 +140,14 @@ final class Library {
         }
 
         // Tabs opened from outside the library come back too, if still there.
+        // A file already loaded from the folder is not opened a second time, no
+        // matter which spelling of its path the index happens to hold.
+        var seen = Set(loaded.map { Library.canonical($0.url) })
         for entry in index.order where entry.hasPrefix("/") {
             let url = URL(fileURLWithPath: entry)
-            if !contains(url), let note = read(url) { loaded.append(note) }
+            guard !contains(url), seen.insert(Library.canonical(url)).inserted,
+                  let note = read(url) else { continue }
+            loaded.append(note)
         }
 
         // Remembered order first, anything new (dropped in from Finder) after it.

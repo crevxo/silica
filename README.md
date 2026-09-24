@@ -33,11 +33,11 @@ or put it in a git repo.
 This produces `dist/Silica.app`. The local build is ad-hoc signed and uses
 `Resources/Silica.icns`.
 
-The default version is `1.1.0` with build number `3`. Override either without
+The default version is `1.1.1` with build number `4`. Override either without
 editing source:
 
 ```sh
-SILICA_VERSION=1.1.1 SILICA_BUILD=4 ./build.sh
+SILICA_VERSION=1.1.2 SILICA_BUILD=5 ./build.sh
 ```
 
 Release builds use the appcast at

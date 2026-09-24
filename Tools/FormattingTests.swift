@@ -230,5 +230,54 @@ do {
     try? FileManager.default.removeItem(at: folder)
 }
 
+print("\nA library reached through a shortcut")
+do {
+    // One file can arrive as several different URLs. When the library folder is
+    // a symlink, the note created in memory and the same note read back off disk
+    // spell their paths differently — which used to open a second tab for it on
+    // every launch, and file its history under two names.
+    let home = FileManager.default.homeDirectoryForCurrentUser
+    let real = home.appendingPathComponent("Developer/.silica-test-\(UUID().uuidString)")
+    try? FileManager.default.createDirectory(at: real.appendingPathComponent("Notes"), withIntermediateDirectories: true)
+    let link = home.appendingPathComponent("Developer/.silica-test-link-\(UUID().uuidString)")
+    try? FileManager.default.createSymbolicLink(at: link, withDestinationURL: real)
+    let folder = link.appendingPathComponent("Notes")
+    let library = Library(folder: folder)
+
+    var note = library.create(titled: "Alpha")
+    note.text = "first"
+    library.write(note)
+    check("a note in it counts as a library note", library.contains(note.url))
+
+    var tabs = [note]
+    for pass in 1...3 {
+        library.saveIndex(notes: tabs, activeID: tabs.first?.id)
+        tabs = library.load().notes
+        check("still one tab after reload \(pass)", tabs.count == 1, "\(tabs.count) tabs")
+    }
+
+    let store = VersionStore(libraryFolder: folder)
+    store.snapshotIfNeeded(note, force: true)
+    var reloaded = tabs[0]
+    reloaded.text = "second"
+    store.snapshotIfNeeded(reloaded, force: true)
+    let piles = (try? FileManager.default.contentsOfDirectory(
+        atPath: folder.appendingPathComponent(".silica-versions").path))?.sorted() ?? []
+    check("its history lives in one folder", piles == ["Alpha"], "\(piles)")
+    check("and the open tab can see all of it", store.versions(for: reloaded).count == 2,
+          "\(store.versions(for: reloaded).count) versions")
+
+    let outside = real.appendingPathComponent("Outside.md")
+    try? "away".write(to: outside, atomically: true, encoding: .utf8)
+    let opened = library.read(outside)
+    check("a file from outside is still treated as outside", opened.map { !library.contains($0.url) } ?? false)
+    library.saveIndex(notes: [reloaded, opened].compactMap { $0 }, activeID: opened?.id)
+    check("both tabs come back, once each", library.load().notes.count == 2,
+          "\(library.load().notes.map(\.title))")
+
+    try? FileManager.default.removeItem(at: link)
+    try? FileManager.default.removeItem(at: real)
+}
+
 print(failures == 0 ? "\nall checks passed\n" : "\n\(failures) FAILED\n")
 exit(failures == 0 ? 0 : 1)

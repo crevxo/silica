@@ -9,5 +9,5 @@ trap 'rm -rf "$OUT"' EXIT
 # swiftc only allows top-level statements in a file called main.swift.
 cp Tools/FormattingTests.swift "$OUT/main.swift"
 swiftc -o "$OUT/tests" "$OUT/main.swift" \
-    "$SRC/Editor.swift" "$SRC/Markdown.swift" "$SRC/Theme.swift" "$SRC/Library.swift"
+    "$SRC/Editor.swift" "$SRC/Markdown.swift" "$SRC/Theme.swift" "$SRC/Library.swift" "$SRC/Versions.swift"
 "$OUT/tests"

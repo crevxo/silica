@@ -189,7 +189,8 @@ final class AppState: ObservableObject {
     func open(_ urls: [URL]) {
         for url in urls {
             let standard = url.standardizedFileURL
-            if let i = notes.firstIndex(where: { $0.url.standardizedFileURL == standard }) {
+            let canonical = Library.canonical(url)
+            if let i = notes.firstIndex(where: { Library.canonical($0.url) == canonical }) {
                 // A tab that was never written shares its path with a file that
                 // has since appeared on disk; the file wins, not the blank tab.
                 if notes[i].text.isEmpty, let fresh = library.read(standard) {

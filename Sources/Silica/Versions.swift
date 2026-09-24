@@ -22,12 +22,12 @@ final class VersionStore {
     private var lastSnapshot: [URL: Date] = [:]
 
     init(libraryFolder: URL) {
-        self.libraryFolder = libraryFolder.standardizedFileURL
+        self.libraryFolder = libraryFolder
         folder = VersionStore.folder(in: libraryFolder)
     }
 
     func relocate(to libraryFolder: URL) {
-        self.libraryFolder = libraryFolder.standardizedFileURL
+        self.libraryFolder = libraryFolder
         folder = VersionStore.folder(in: libraryFolder)
         lastSnapshot.removeAll()
     }
@@ -77,14 +77,15 @@ final class VersionStore {
     /// the library carries its folder in the key so it never shares a pile
     /// with a library note of the same name.
     private func pile(for url: URL) -> String {
-        let standard = url.standardizedFileURL
-        let stem = standard.deletingPathExtension().lastPathComponent
-        let parent = standard.deletingLastPathComponent()
-        guard parent != libraryFolder else { return stem }
+        let stem = url.deletingPathExtension().lastPathComponent
+        // Compared and hashed in one canonical form, so the same note cannot be
+        // handed two piles depending on which spelling of its path it carries.
+        let parent = Library.canonical(url.deletingLastPathComponent())
+        guard parent != Library.canonical(libraryFolder) else { return stem }
         // A stable hash: Swift's hashValue is re-seeded on every launch, which
         // would give the file a fresh history folder each time it is opened.
         var h: UInt32 = 5381
-        for byte in parent.path.utf8 { h = (h &* 33) &+ UInt32(byte) }
+        for byte in parent.utf8 { h = (h &* 33) &+ UInt32(byte) }
         return "\(stem)@\(String(format: "%08x", h))"
     }
 

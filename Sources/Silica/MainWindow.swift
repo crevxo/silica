@@ -156,6 +156,10 @@ struct TabBar: View {
                     HStack(spacing: 2) {
                         ForEach(state.notes) { note in
                             TabPill(note: note)
+                                .transition(.asymmetric(
+                                    insertion: .opacity,
+                                    removal: .scale(scale: 0.85).combined(with: .opacity)
+                                ))
                         }
                     }
                 }
@@ -190,6 +194,10 @@ private struct TabPill: View {
     @EnvironmentObject var state: AppState
     @Environment(\.palette) private var palette
     @State private var hovering = false
+    /// The close button tracks the pointer and the press separately, so it can
+    /// light up under the cursor and give under the click.
+    @State private var closeHovering = false
+    @State private var closePressed = false
     @State private var draft = ""
     @FocusState private var editing: Bool
 
@@ -219,11 +227,27 @@ private struct TabPill: View {
 
             Image(systemName: "xmark")
                 .font(.system(size: 8, weight: .bold))
-                .foregroundStyle(palette.inkSoft)
+                .foregroundStyle(closeHovering ? palette.ink : palette.inkSoft)
                 .frame(width: 13, height: 13)
-                .background(Circle().fill(palette.pill.opacity(hovering ? 1 : 0)))
-                .opacity(hovering || isActive ? 0.65 : 0)
-                .onTapGesture { state.close(note.id) }
+                .background(Circle().fill(palette.pill.opacity(closeHovering ? 1 : (hovering ? 0.55 : 0))))
+                .opacity(hovering || isActive ? (closeHovering ? 1 : 0.65) : 0)
+                .scaleEffect(closePressed ? 0.8 : 1)
+                .contentShape(Circle())
+                .onHover { closeHovering = $0 }
+                .animation(.easeOut(duration: 0.12), value: closeHovering)
+                .animation(.spring(response: 0.2, dampingFraction: 0.55), value: closePressed)
+                // A drag gesture rather than a tap, so the button can give while
+                // the mouse is still down and spring back if you slide off it.
+                .gesture(
+                    DragGesture(minimumDistance: 0)
+                        .onChanged { _ in closePressed = true }
+                        .onEnded { value in
+                            closePressed = false
+                            let slipped = abs(value.translation.width) > 12 || abs(value.translation.height) > 12
+                            guard !slipped else { return }
+                            withAnimation(.easeOut(duration: 0.16)) { state.close(note.id) }
+                        }
+                )
         }
         .padding(.horizontal, 8)
         .padding(.vertical, 4)
