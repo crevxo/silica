@@ -84,8 +84,10 @@ final class VersionStore {
         guard parent != Library.canonical(libraryFolder) else { return stem }
         // A stable hash: Swift's hashValue is re-seeded on every launch, which
         // would give the file a fresh history folder each time it is opened.
+        // Hashed from the path as given, not the resolved one, so a file behind
+        // a symlink keeps the history folder it had before 1.2.
         var h: UInt32 = 5381
-        for byte in parent.utf8 { h = (h &* 33) &+ UInt32(byte) }
+        for byte in url.standardizedFileURL.deletingLastPathComponent().path.utf8 { h = (h &* 33) &+ UInt32(byte) }
         return "\(stem)@\(String(format: "%08x", h))"
     }
 
